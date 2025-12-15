@@ -26,7 +26,7 @@
                         <span class="text-primary border-l-7 mr-2 rounded-md"></span>
                         Central Authentication
                     </h1>
-                    <p class="text-neutral-600 dark:text-neutral-400">Sign in to access your account</p>
+                    <p class="text-neutral-600 dark:text-neutral-400">Sign in to access your accounts</p>
                 </div>
 
                 <!-- Cookie Error Display -->
