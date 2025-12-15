@@ -26,7 +26,7 @@
                         <span class="text-primary border-l-7 mr-2 rounded-md"></span>
                         Central Authentication
                     </h1>
-                    <p class="text-neutral-600 dark:text-neutral-400">Sign in to access your accounts</p>
+                    <p class="text-neutral-600 dark:text-neutral-400">Sign in to access your account</p>
                 </div>
 
                 <!-- Cookie Error Display -->
@@ -44,13 +44,20 @@
                                     <p>{{ cookieErrorMessage }}</p>
                                 </div>
                                 <div class="mt-3">
-                                    <div class="-mx-2 -my-1.5 flex">
+                                    <div class="-mx-2 -my-1.5 flex space-x-2">
                                         <button
                                             type="button"
                                             @click="goToMainSite"
                                             class="rounded-md bg-red-50 dark:bg-red-800 px-3 py-1.5 text-sm font-medium text-red-800 dark:text-red-300 hover:bg-red-100 dark:hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-600 focus:ring-offset-2 dark:focus:ring-offset-gray-900"
                                         >
-                                            Go Back
+                                            Go to Main Site
+                                        </button>
+                                        <button
+                                            type="button"
+                                            @click="refreshAndCheck"
+                                            class="rounded-md bg-blue-50 dark:bg-blue-800 px-3 py-1.5 text-sm font-medium text-blue-800 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-700"
+                                        >
+                                            Retry
                                         </button>
                                     </div>
                                 </div>
@@ -59,10 +66,70 @@
                     </div>
                 </div>
 
+                <!-- Cookie Debug Info (Remove in production) -->
+                <div v-if="debugMode" class="mb-4 p-4 bg-gray-100 dark:bg-gray-800 rounded-lg">
+                    <h4 class="font-bold mb-2">Debug Info:</h4>
+                    <pre class="text-xs">{{ debugInfo }}</pre>
+                </div>
+
                 <!-- Render appropriate login component -->
                 <div v-if="!cookieError">
                     <AdminLogin v-if="userRole === 'admin'" />
-                    <UserLogin v-else />
+                    <UserLogin v-else-if="userRole === 'user'" />
+                    
+                    <!-- No cookie but direct access - show options -->
+                    <div v-else class="bg-white dark:bg-neutral-900 rounded-xl shadow-lg p-8 max-w-lg">
+                        <div class="text-center mb-6">
+                            <h3 class="text-xl font-bold text-neutral-800 dark:text-white mb-2">
+                                How would you like to sign in?
+                            </h3>
+                            <p class="text-neutral-600 dark:text-neutral-400">
+                                Please select your account type
+                            </p>
+                        </div>
+                        
+                        <div class="space-y-4">
+                            <button
+                                @click="setUserCookieAndContinue"
+                                class="w-full p-4 text-left border-2 border-gray-200 dark:border-gray-700 rounded-lg hover:border-primary transition-colors"
+                            >
+                                <div class="flex items-center">
+                                    <div class="size-10 bg-blue-100 dark:bg-blue-900 rounded-lg flex items-center justify-center mr-3">
+                                        <i class="pi pi-user text-blue-600 dark:text-blue-400"></i>
+                                    </div>
+                                    <div>
+                                        <h4 class="font-bold text-neutral-800 dark:text-white">User Account</h4>
+                                        <p class="text-sm text-neutral-600 dark:text-neutral-400">
+                                            For regular users to play quizzes and games
+                                        </p>
+                                    </div>
+                                </div>
+                            </button>
+                            
+                            <button
+                                @click="setAdminCookieAndContinue"
+                                class="w-full p-4 text-left border-2 border-gray-200 dark:border-gray-700 rounded-lg hover:border-primary transition-colors"
+                            >
+                                <div class="flex items-center">
+                                    <div class="size-10 bg-red-100 dark:bg-red-900 rounded-lg flex items-center justify-center mr-3">
+                                        <i class="pi pi-shield text-red-600 dark:text-red-400"></i>
+                                    </div>
+                                    <div>
+                                        <h4 class="font-bold text-neutral-800 dark:text-white">Admin Account</h4>
+                                        <p class="text-sm text-neutral-600 dark:text-neutral-400">
+                                            For administrators to manage the platform
+                                        </p>
+                                    </div>
+                                </div>
+                            </button>
+                        </div>
+                        
+                        <div class="mt-6 pt-4 border-t border-neutral-200 dark:border-neutral-700">
+                            <p class="text-sm text-neutral-500 dark:text-neutral-400 text-center">
+                                For best experience, please access this page through the main application.
+                            </p>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -70,15 +137,13 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { useMessage } from 'naive-ui'
 import AdminLogin from '@/components/AdminLogin.vue'
 import UserLogin from '@/components/UserLogin.vue'
 import { getAuthIntentCookie, clearAuthIntentCookie, setAuthIntentCookie } from '@/utils/cookieChecker'
 
 const router = useRouter()
-const message = useMessage()
 
 // Random background images
 const images = [
@@ -91,7 +156,8 @@ const userRole = ref(null)
 const cookieError = ref(false)
 const cookieErrorTitle = ref('')
 const cookieErrorMessage = ref('')
-const directAccess = ref(false)
+const debugMode = ref(false) // Set to true for debugging
+const debugInfo = ref('')
 
 // Methods
 const getRandomImage = () => {
@@ -100,20 +166,23 @@ const getRandomImage = () => {
 }
 
 const checkAuthCookie = () => {
+    console.log('🔐 [Login.vue] Checking auth cookie on auth.fansmeed.com')
+    console.log('🔐 [Login.vue] Current hostname:', window.location.hostname)
+    
     const cookieResult = getAuthIntentCookie()
     
+    // Debug info
+    if (debugMode.value) {
+        debugInfo.value = JSON.stringify({
+            timestamp: new Date().toISOString(),
+            hostname: window.location.hostname,
+            referrer: document.referrer,
+            cookieResult: cookieResult,
+            allCookies: document.cookie
+        }, null, 2)
+    }
+    
     if (!cookieResult.valid) {
-        // Check if this is direct access
-        const referrer = document.referrer
-        const allowedDomains = ['fansmeed.com', 'cp.fansmeed.com']
-        const isFromAllowedDomain = allowedDomains.some(domain => referrer.includes(domain))
-        
-        if (!isFromAllowedDomain && referrer) {
-            // Came from somewhere else (like Google search)
-            directAccess.value = true
-            return
-        }
-        
         cookieError.value = true
         cookieErrorTitle.value = cookieResult.expired ? 'Login Attempt Expired' : 'Authentication Required'
         cookieErrorMessage.value = cookieResult.error || 'Please access this page through the main application.'
@@ -122,36 +191,71 @@ const checkAuthCookie = () => {
             clearAuthIntentCookie()
         }
     } else {
-        // ✅ PRESERVE the existing cookie - don't overwrite it!
         userRole.value = cookieResult.data.userRole
-        console.log(`🔐 Detected user role from existing cookie: ${userRole.value}`)
-        console.log(`🔐 Redirect URL from cookie: ${cookieResult.data.redirectUrl}`)
+        console.log(`🔐 [Login.vue] Detected user role: ${userRole.value}`)
+        console.log(`🔐 [Login.vue] Redirect URL: ${cookieResult.data.redirectUrl}`)
+        
+        // Store in session for later redirect
+        if (cookieResult.data.redirectUrl) {
+            sessionStorage.setItem('authRedirectUrl', cookieResult.data.redirectUrl)
+        }
+        
+        // Clear error state
+        cookieError.value = false
     }
 }
 
 const setUserCookieAndContinue = () => {
-    // Set user cookie and refresh
-    setAuthIntentCookie('user', '/')
-    window.location.reload()
+    console.log('🔐 Setting user cookie for direct access')
+    // Get current URL to redirect back after login
+    const currentUrl = new URL(window.location.href)
+    const redirectBack = currentUrl.searchParams.get('redirect') || 'https://fansmeed.com'
+    
+    setAuthIntentCookie('user', redirectBack)
+    
+    // Refresh to pick up the cookie
+    setTimeout(() => {
+        window.location.reload()
+    }, 500)
 }
 
 const setAdminCookieAndContinue = () => {
-    // Set admin cookie and refresh
-    setAuthIntentCookie('admin', '/')
-    window.location.reload()
+    console.log('🔐 Setting admin cookie for direct access')
+    const currentUrl = new URL(window.location.href)
+    const redirectBack = currentUrl.searchParams.get('redirect') || 'https://cp.fansmeed.com'
+    
+    setAuthIntentCookie('admin', redirectBack)
+    
+    setTimeout(() => {
+        window.location.reload()
+    }, 500)
 }
 
 const goToMainSite = () => {
-    let targetDomain = 'fansmeed.com'
+    // Redirect to appropriate main site based on role if known
     if (userRole.value === 'admin') {
-        targetDomain = 'cp.fansmeed.com'
+        window.location.href = 'https://cp.fansmeed.com'
+    } else {
+        window.location.href = 'https://fansmeed.com'
     }
-    window.location.href = `https://${targetDomain}`
+}
+
+const refreshAndCheck = () => {
+    // Clear cookie and retry
+    clearAuthIntentCookie()
+    cookieError.value = false
+    setTimeout(() => {
+        window.location.reload()
+    }, 300)
 }
 
 // Initialize
 onMounted(() => {
     getRandomImage()
     checkAuthCookie()
+    
+    // Enable debug mode if URL has debug param
+    const urlParams = new URLSearchParams(window.location.search)
+    debugMode.value = urlParams.has('debug')
 })
 </script>

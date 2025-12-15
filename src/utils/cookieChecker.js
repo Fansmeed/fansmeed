@@ -3,13 +3,14 @@
  * Handles cookie creation, validation, and cleanup
  */
 
-// Cookie configuration
+// Cookie configuration - FIXED FOR CROSS-DOMAIN
 const COOKIE_CONFIG = {
     NAME: 'authIntent',
     MAX_AGE: 1200, // 20 minutes in seconds (20 * 60)
     PATH: '/',
     SECURE: true,
-    SAMESITE: 'strict'
+    SAMESITE: 'none', // Changed to 'none' for cross-domain
+    DOMAIN: '.fansmeed.com' // Added domain for cross-subdomain sharing
 };
 
 // Valid user roles
@@ -94,44 +95,37 @@ function validateToken(token) {
 }
 
 /**
- * Create auth intent cookie
+ * Create auth intent cookie - FIXED VERSION
  */
-// In cookieChecker.js - update the setAuthIntentCookie function
-
 export function setAuthIntentCookie(userRole, redirectUrl) {
     try {
-        // ✅ FIRST, check if there's already a valid cookie
-        const existingCookie = getAuthIntentCookie()
+        console.log('🍪 [auth] Setting auth cookie for role:', userRole);
+        console.log('🍪 [auth] Redirect URL:', redirectUrl);
         
-        if (existingCookie.valid) {
-            // Keep the existing cookie's redirect URL if it exists
-            const finalRedirectUrl = redirectUrl || existingCookie.data.redirectUrl || '/'
-            
-            console.log('🍪 Preserving existing cookie with redirect:', finalRedirectUrl)
-            
-            // Don't overwrite - keep the existing cookie
-            return true
-        }
-        
-        // Only set new cookie if none exists
-        if (!existingCookie.valid) {
-            const authData = {
-                userRole,
-                redirectUrl: redirectUrl || '/',
-                loginTimeRequest: Date.now(),
-                validationToken: generateValidationToken()
-            };
+        const authData = {
+            userRole,
+            redirectUrl: redirectUrl || window.location.origin,
+            loginTimeRequest: Date.now(),
+            validationToken: generateValidationToken(),
+            source: 'auth.fansmeed.com',
+            timestamp: Date.now()
+        };
 
-            const encodedData = btoa(JSON.stringify(authData));
-            
-            document.cookie = `${COOKIE_CONFIG.NAME}=${encodedData}; ` +
-                             `path=${COOKIE_CONFIG.PATH}; ` +
-                             `max-age=${COOKIE_CONFIG.MAX_AGE}; ` +
-                             `secure=${COOKIE_CONFIG.SECURE}; ` +
-                             `samesite=${COOKIE_CONFIG.SAMESITE}`;
-            
-            console.log('🍪 New auth cookie set:', { role: userRole, redirect: redirectUrl || '/' });
-        }
+        const encodedData = btoa(JSON.stringify(authData));
+        
+        // CRITICAL: Must include domain for cross-subdomain access
+        const cookieString = `${COOKIE_CONFIG.NAME}=${encodedData}; ` +
+                           `domain=${COOKIE_CONFIG.DOMAIN}; ` +
+                           `path=${COOKIE_CONFIG.PATH}; ` +
+                           `max-age=${COOKIE_CONFIG.MAX_AGE}; ` +
+                           `secure=${COOKIE_CONFIG.SECURE}; ` +
+                           `samesite=${COOKIE_CONFIG.SAMESITE}`;
+        
+        console.log('🍪 [auth] Setting cookie:', cookieString);
+        document.cookie = cookieString;
+        
+        // Debug: Verify cookie was set
+        console.log('🍪 [auth] Current cookies after set:', document.cookie);
         
         return true;
     } catch (error) {
@@ -141,16 +135,24 @@ export function setAuthIntentCookie(userRole, redirectUrl) {
 }
 
 /**
- * Read and validate auth intent cookie
+ * Read and validate auth intent cookie - FIXED VERSION
  */
 export function getAuthIntentCookie() {
     try {
+        console.log('🍪 [auth] Reading cookies from:', window.location.hostname);
+        console.log('🍪 [auth] All cookies:', document.cookie);
+        
         const cookies = document.cookie.split(';');
+        console.log('🍪 [auth] Split cookies:', cookies);
+        
         const authCookie = cookies.find(cookie => 
             cookie.trim().startsWith(`${COOKIE_CONFIG.NAME}=`)
         );
 
+        console.log('🍪 [auth] Found auth cookie:', authCookie);
+
         if (!authCookie) {
+            console.log('🍪 [auth] No auth intent cookie found');
             return {
                 valid: false,
                 error: 'No auth intent cookie found'
@@ -158,55 +160,81 @@ export function getAuthIntentCookie() {
         }
 
         const encodedData = authCookie.split('=')[1];
-        const authData = JSON.parse(atob(encodedData));
+        console.log('🍪 [auth] Encoded data:', encodedData);
         
-        // Validate required fields
-        if (!authData.userRole || !authData.loginTimeRequest || !authData.validationToken) {
-            return {
-                valid: false,
-                error: 'Missing required fields in cookie'
-            };
-        }
-        
-        // Validate user role
-        if (![USER_ROLES.USER, USER_ROLES.ADMIN].includes(authData.userRole)) {
-            return {
-                valid: false,
-                error: 'Invalid user role'
-            };
-        }
-        
-        // Check timestamp
-        const currentTime = Date.now();
-        const cookieAge = currentTime - authData.loginTimeRequest;
-        const maxAgeMs = COOKIE_CONFIG.MAX_AGE * 1000;
-        
-        if (cookieAge > maxAgeMs) {
-            // Clean up expired cookie
-            clearAuthIntentCookie();
-            return {
-                valid: false,
-                error: 'Login attempt expired',
-                expired: true
-            };
-        }
-        
-        // Validate encryption token
-        if (!validateToken(authData.validationToken)) {
-            return {
-                valid: false,
-                error: 'Invalid or corrupted authentication token'
-            };
-        }
-        
-        return {
-            valid: true,
-            data: {
-                userRole: authData.userRole,
-                redirectUrl: authData.redirectUrl,
-                loginTimeRequest: authData.loginTimeRequest
+        try {
+            // Decode with padding fix
+            const decodedData = atob(encodedData.replace(/\s/g, ''));
+            console.log('🍪 [auth] Decoded data:', decodedData);
+            
+            const authData = JSON.parse(decodedData);
+            console.log('🍪 [auth] Parsed auth data:', authData);
+            
+            // Validate required fields
+            if (!authData.userRole || !authData.loginTimeRequest || !authData.validationToken) {
+                console.log('🍪 [auth] Missing required fields');
+                return {
+                    valid: false,
+                    error: 'Missing required fields in cookie'
+                };
             }
-        };
+            
+            // Validate user role
+            if (![USER_ROLES.USER, USER_ROLES.ADMIN].includes(authData.userRole)) {
+                console.log('🍪 [auth] Invalid user role:', authData.userRole);
+                return {
+                    valid: false,
+                    error: 'Invalid user role'
+                };
+            }
+            
+            // Check timestamp
+            const currentTime = Date.now();
+            const cookieAge = currentTime - authData.loginTimeRequest;
+            const maxAgeMs = COOKIE_CONFIG.MAX_AGE * 1000;
+            
+            console.log('🍪 [auth] Cookie age:', cookieAge, 'ms, Max age:', maxAgeMs, 'ms');
+            
+            if (cookieAge > maxAgeMs) {
+                console.log('🍪 [auth] Cookie expired');
+                // Clean up expired cookie
+                clearAuthIntentCookie();
+                return {
+                    valid: false,
+                    error: 'Login attempt expired',
+                    expired: true
+                };
+            }
+            
+            // Validate encryption token
+            if (!validateToken(authData.validationToken)) {
+                console.log('🍪 [auth] Invalid validation token');
+                return {
+                    valid: false,
+                    error: 'Invalid or corrupted authentication token'
+                };
+            }
+            
+            console.log('🍪 [auth] Cookie is valid, role:', authData.userRole);
+            console.log('🍪 [auth] Redirect URL:', authData.redirectUrl);
+            
+            return {
+                valid: true,
+                data: {
+                    userRole: authData.userRole,
+                    redirectUrl: authData.redirectUrl,
+                    loginTimeRequest: authData.loginTimeRequest,
+                    source: authData.source
+                }
+            };
+            
+        } catch (parseError) {
+            console.error('🍪 [auth] Cookie parse error:', parseError);
+            return {
+                valid: false,
+                error: 'Corrupted authentication data'
+            };
+        }
         
     } catch (error) {
         console.error('Failed to parse auth intent cookie:', error);
@@ -218,13 +246,17 @@ export function getAuthIntentCookie() {
 }
 
 /**
- * Clear auth intent cookie
+ * Clear auth intent cookie - FIXED VERSION
  */
 export function clearAuthIntentCookie() {
     document.cookie = `${COOKIE_CONFIG.NAME}=; ` +
+                     `domain=${COOKIE_CONFIG.DOMAIN}; ` +
                      `path=${COOKIE_CONFIG.PATH}; ` +
                      `max-age=0; ` +
-                     `expires=Thu, 01 Jan 1970 00:00:00 GMT`;
+                     `expires=Thu, 01 Jan 1970 00:00:00 GMT; ` +
+                     `samesite=${COOKIE_CONFIG.SAMESITE}`;
+    
+    console.log('🍪 [auth] Auth cookie cleared');
 }
 
 /**
@@ -245,4 +277,27 @@ export function getTargetDomain(userRole) {
         default:
             return 'fansmeed.com';
     }
+}
+
+/**
+ * Build redirect URL after authentication
+ */
+export function buildRedirectUrl(userRole, redirectFromCookie = null) {
+    const targetDomain = getTargetDomain(userRole);
+    let redirectPath = '/';
+    
+    // Use the redirect URL from cookie if available and valid
+    if (redirectFromCookie) {
+        try {
+            const url = new URL(redirectFromCookie);
+            // Only use if it's from the target domain
+            if (url.hostname.includes(targetDomain)) {
+                redirectPath = url.pathname + url.search;
+            }
+        } catch (error) {
+            console.log('Invalid redirect URL in cookie:', error);
+        }
+    }
+    
+    return `https://${targetDomain}${redirectPath}`;
 }

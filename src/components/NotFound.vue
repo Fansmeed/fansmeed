@@ -55,7 +55,7 @@
                     </p>
 
                     <div class="mt-5">
-                        <Button label="Back To Home" @click="handleBackToHome" icon="pi pi-home" severity="warn" />
+                        <Button label="Back To Login" @click="handleBackToHome" icon="pi pi-home" severity="warn" />
                     </div>
                 </div>
             </div>
@@ -86,7 +86,7 @@ const getRandomImage = () => {
 
 // Handle back to home
 const handleBackToHome = () => {
-    router.push({ name: 'Home' })
+    router.push({ name: 'Login' })
 }
 
 // Set random image on component mount
