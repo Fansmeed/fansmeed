@@ -1,0 +1,32 @@
+html, body {
+  scroll-behavior: smooth;
+  overflow-x: hidden;
+  overscroll-behavior-y: contain;
+}
+
+body {
+  font-family: "Lexend", sans-serif;
+  margin: 0;
+  padding: 0;
+}
+
+/* Hide scrollbar for all browsers */
+::-webkit-scrollbar {
+  display: none;
+}
+
+* {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* Form item styles */
+.el-form-item {
+  width: 100%;
+  padding: 0.8rem 0;
+}
+
+.el-form-item .p-floatlabel,
+.el-form-item .p-datepicker {
+  width: 100%;
+}

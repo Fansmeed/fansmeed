@@ -1,0 +1,50 @@
+@import "tailwindcss";
+@import "tailwindcss-primeui";
+
+@custom-variant dark (&:where(.app-dark-mode, .app-dark-mode *));
+
+@layer base {
+
+  /* Light mode (default) */
+  :root {
+    --color-primary: #fc5601;
+    --color-background: #fcfcfc;
+    --color-text: #212529;
+    --color-card: #c7c7c7;
+    --color-border: #dee2e6;
+    --color-footer-border: #333333;
+  }
+
+  /* Dark mode */
+  .app-dark-mode {
+    --color-primary: #fc5601;
+    --color-background: #212121;
+    --color-text: #f8f9fa;
+    --color-card: #363636;
+    --color-border: #333333;
+    --color-footer-border: #cccccca9;
+  }
+
+  /* Base styles */
+  * {
+    box-sizing: border-box;
+  }
+
+  body {
+    background-color: rgb(var(--color-background));
+    color: rgb(var(--color-text));
+    transition: background-color 0.3s, color 0.3s;
+  }
+}
+
+@theme {
+  /* Map CSS variables to Tailwind colors */
+  --color-primary: rgb(var(--color-primary));
+  --color-background: rgb(var(--color-background));
+  --color-text: rgb(var(--color-text));
+  --color-card: rgb(var(--color-card));
+  --color-border: rgb(var(--color-border));
+  --color-footer-border: rgb(var(--color-footer-border));
+}
+
+@layer primevue;
