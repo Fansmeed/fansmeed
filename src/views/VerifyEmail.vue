@@ -67,7 +67,7 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { useMessage } from 'naive-ui'
 import { useAuthStore, AUTH_OPERATIONS } from '@/stores/authStore'
 import { useUiStore } from '@/stores/uiStore'
 import { formatFirebaseErrorForDisplay } from '@/utils/errorHelper'
@@ -75,6 +75,8 @@ import { formatFirebaseErrorForDisplay } from '@/utils/errorHelper'
 const router = useRouter()
 const authStore = useAuthStore()
 const uiStore = useUiStore()
+const message = useMessage()
+
 
 const verificationSuccess = ref(false)
 
@@ -97,7 +99,7 @@ const handleVerification = async () => {
         await authStore.verifyEmail(currentUrl)
         
         verificationSuccess.value = true
-        ElMessage.success('Email verified successfully!')
+        message.success('Email verified successfully!')
         
     } catch (error) {
         console.error('Email verification error:', error)

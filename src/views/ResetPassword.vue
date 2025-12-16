@@ -36,16 +36,6 @@
                     </p>
                 </div>
 
-                <!-- Error Display -->
-                <div v-if="displayError" class="mb-6">
-                    <ErrorDisplay 
-                        :error="displayError" 
-                        @retry="validateEmail"
-                        :isLoading="uiStore.isLoading(AUTH_OPERATIONS.USER_RESET_PASSWORD)"
-                        customTitle="Password Reset"
-                    />
-                </div>
-
                 <!-- Scrollable Form Container -->
                 <div
                     class="form-container max-h-[calc(100vh-200px)] overflow-y-auto shadow-lg border-2 border-gray-500 dark:border-gray-400 rounded-xl max-w-lg">
@@ -123,7 +113,6 @@
                                         icon="pi pi-sign-in" 
                                         severity="contrast"
                                         @click="goToLogin" 
-                                        :disabled="uiStore.isLoading(AUTH_OPERATIONS.USER_RESET_PASSWORD)"
                                     />
                                 </div>
                             </div>
@@ -136,15 +125,15 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useMessage } from 'naive-ui'
-import { ElMessage } from 'element-plus'
+import { collection, query, where, getDocs } from 'firebase/firestore'
+import { db } from '@/firebase/firebaseInit'
 import Button from 'primevue/button'
 import { useAuthStore, AUTH_OPERATIONS } from '@/stores/authStore'
 import { useUiStore } from '@/stores/uiStore'
-import ErrorDisplay from '@/components/ErrorDisplay.vue'
-import { formatFirebaseErrorForDisplay } from '@/utils/errorHelper'
+import { formatAnyErrorForDisplay, isFormValidationError } from '@/utils/errorFormatter' // Updated import
 
 const router = useRouter()
 const message = useMessage()
@@ -166,20 +155,7 @@ const resetForm = ref({
     email: ''
 })
 
-// Computed
-const displayError = computed(() => {
-    const error = uiStore.getError(AUTH_OPERATIONS.USER_RESET_PASSWORD)
-    if (!error) return null
-    
-    return {
-        message: formatFirebaseErrorForDisplay(error.message || error.toString()),
-        isTimeout: error.isTimeout,
-        operation: AUTH_OPERATIONS.USER_RESET_PASSWORD,
-        code: error.code
-    }
-})
-
-// Validation Rules
+// Validation Rules (keep this)
 const resetRules = {
     email: {
         required: true,
@@ -208,27 +184,29 @@ const nextStep = () => {
     }
 }
 
-const prevStep = () => {
-    if (currentStep.value > 0) {
-        currentStep.value--
-    }
-}
-
 const validateEmail = async () => {
     try {
+        // First validate the form
         await resetFormRef.value?.validate()
-
+        
+        // If validation passes, proceed with password reset
         await authStore.userResetPassword(resetForm.value.email)
         
-        // Clear any previous errors
-        uiStore.clearError(AUTH_OPERATIONS.USER_RESET_PASSWORD)
-        
+        // Show success message
+        message.success('Password reset email sent! Check your inbox.')
         nextStep()
-
     } catch (error) {
         console.error('Password reset error:', error)
-        const formattedError = formatFirebaseErrorForDisplay(error.message || error.toString())
-        ElMessage.error(formattedError || 'Failed to send reset link')
+        
+        // Check if it's a form validation error using the helper function
+        if (isFormValidationError(error)) {
+            // Show generic form validation error message
+            message.error('Please ensure all form requirements are met')
+        } else {
+            // Use the centralized error formatter for other errors
+            const formattedError = formatAnyErrorForDisplay(error)
+            message.error(formattedError || 'Failed to send reset link')
+        }
     }
 }
 
@@ -243,7 +221,5 @@ const goToLogin = () => {
 // Initialize
 onMounted(() => {
     getRandomImage()
-    // Clear any existing errors on mount
-    uiStore.clearError(AUTH_OPERATIONS.USER_RESET_PASSWORD)
 })
 </script>

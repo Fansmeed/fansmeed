@@ -31,7 +31,6 @@ import {
     deleteDoc
 } from "firebase/firestore";
 import { collectDeviceInfo } from '@/utils/deviceInfo';
-import { ElMessage } from 'element-plus';
 import { getAuthIntentCookie, clearAuthIntentCookie, getTargetDomain } from '@/utils/cookieChecker';
 
 // Authentication operations
@@ -41,11 +40,11 @@ export const AUTH_OPERATIONS = {
     USER_REGISTER: 'USER_REGISTER',
     USER_RESET_PASSWORD: 'USER_RESET_PASSWORD',
     USER_VERIFY_EMAIL: 'USER_VERIFY_EMAIL',
-    
+
     // Admin operations
     ADMIN_LOGIN: 'ADMIN_LOGIN',
     ADMIN_SEND_LINK: 'ADMIN_SEND_LINK',
-    
+
     // Common operations
     COMPLETE_SIGN_IN: 'COMPLETE_SIGN_IN',
     CHECK_AUTH: 'CHECK_AUTH',
@@ -151,7 +150,7 @@ async function findUserByEmail(email, collectionName) {
 async function updateLoginHistory(uid, userData, deviceInfo) {
     try {
         console.log('🔄 Updating login history for UID:', uid);
-        
+
         const loginHistory = {
             timestamp: serverTimestamp(),
             deviceInfo: deviceInfo,
@@ -214,7 +213,7 @@ export const useAuthStore = defineStore('auth', {
          */
         async initialize() {
             const uiStore = useUiStore();
-            
+
             return new Promise((resolve) => {
                 uiStore.setLoading('AUTH_INIT', true);
 
@@ -223,7 +222,7 @@ export const useAuthStore = defineStore('auth', {
 
                     if (user) {
                         this.currentUser = user;
-                        
+
                         // Check if email is verified for regular users
                         const cookieResult = getAuthIntentCookie();
                         if (cookieResult.valid && cookieResult.data.userRole === USER_ROLES.USER) {
@@ -232,10 +231,10 @@ export const useAuthStore = defineStore('auth', {
                                 // We'll handle this in the login flow
                             }
                         }
-                        
+
                         // Determine user role from cookie or fetch profile
                         await this.determineUserRole(user);
-                        
+
                     } else {
                         this.currentUser = null;
                         this.userProfile = null;
@@ -255,7 +254,7 @@ export const useAuthStore = defineStore('auth', {
          */
         async determineUserRole(user) {
             const cookieResult = getAuthIntentCookie();
-            
+
             if (cookieResult.valid) {
                 this.userRole = cookieResult.data.userRole;
                 console.log(`🔐 User role determined from cookie: ${this.userRole}`);
@@ -298,10 +297,10 @@ export const useAuthStore = defineStore('auth', {
                 async () => {
                     try {
                         const result = await signInWithEmailAndPassword(auth, email, password);
-                        
+
                         if (!result.user.emailVerified) {
                             // User needs to verify email
-                            throw new Error('Please verify your email before logging in.');
+                            throw new Error('USER_EMAIL_NOT_VERIFIED:Please verify your email before logging in.');
                         }
 
                         // Update login history
@@ -311,24 +310,19 @@ export const useAuthStore = defineStore('auth', {
                         // Fetch user profile
                         await this.fetchUserProfile(result.user.uid, USER_ROLES.USER);
 
-                        ElMessage.success('Login successful!');
-                        return result.user;
+                        // Return success data
+                        return {
+                            user: result.user,
+                            success: true
+                        };
 
                     } catch (error) {
                         console.error('User login error:', error);
-                        
-                        // Handle specific Firebase errors
-                        if (error.code === 'auth/user-not-found') {
-                            throw new Error('No account found with this email.');
-                        } else if (error.code === 'auth/wrong-password') {
-                            throw new Error('Incorrect password.');
-                        } else if (error.code === 'auth/too-many-requests') {
-                            throw new Error('Too many failed attempts. Please try again later.');
-                        } else if (error.code === 'auth/user-disabled') {
-                            throw new Error('This account has been disabled.');
-                        }
-                        
-                        throw error;
+
+                        // ✅ NO Firebase error mapping needed!
+                        // Error formatter will handle: 'auth/user-not-found', 'auth/wrong-password', etc.
+
+                        throw error; // Just re-throw
                     }
                 }
             );
@@ -348,10 +342,10 @@ export const useAuthStore = defineStore('auth', {
                         // 1. Create user in Firebase Auth
                         const result = await createUserWithEmailAndPassword(auth, userData.email, userData.password);
                         const userUid = result.user.uid;
-                        
+
                         // 2. Generate temporary UID for Firestore
                         const temporaryUid = `temp_${Date.now()}_${userData.email.toLowerCase().replace(/[^a-z0-9]/g, '_')}`;
-                        
+
                         // 3. Create user document with temporary UID
                         const userDoc = {
                             id: temporaryUid,
@@ -380,36 +374,114 @@ export const useAuthStore = defineStore('auth', {
                             quizHistory: [],
                             transactionHistory: []
                         };
-                        
+
                         await setDoc(doc(db, COLLECTIONS.USERS, temporaryUid), userDoc);
-                        
+
                         // 4. Send verification email
                         await sendEmailVerification(result.user, {
                             url: `${window.location.origin}/auth/verify-email?email=${encodeURIComponent(userData.email)}`,
                             handleCodeInApp: true
                         });
-                        
+
                         // 5. Sign out the user (they need to verify email first)
                         await signOut(auth);
-                        
+
                         console.log('✅ User registered successfully, verification email sent');
                         return {
                             email: userData.email,
                             temporaryUid: temporaryUid
                         };
-                        
+
                     } catch (error) {
                         console.error('User registration error:', error);
-                        
-                        if (error.code === 'auth/email-already-in-use') {
-                            throw new Error('This email is already registered.');
-                        } else if (error.code === 'auth/weak-password') {
-                            throw new Error('Password is too weak. Please use a stronger password.');
-                        } else if (error.code === 'auth/invalid-email') {
-                            throw new Error('Invalid email address.');
+
+                        // ✅ NO Firebase error mapping needed!
+                        // Error formatter will handle: 'auth/email-already-in-use', 'auth/weak-password', etc.
+
+                        throw error; // Just re-throw
+                    }
+                }
+            );
+        },
+
+        /**
+         * Social login
+         */
+        async socialLogin(providerType) {
+            const uiStore = useUiStore();
+            const key = AUTH_OPERATIONS.SOCIAL_LOGIN;
+
+            return await uiStore.withOperation(
+                key,
+                async () => {
+                    try {
+                        let provider;
+                        if (providerType === 'google') {
+                            provider = new GoogleAuthProvider();
+                        } else if (providerType === 'facebook') {
+                            provider = new FacebookAuthProvider();
+                        } else {
+                            throw new Error('Unsupported social provider');
                         }
-                        
-                        throw error;
+
+                        const result = await signInWithPopup(auth, provider);
+                        const userUid = result.user.uid;
+                        const email = result.user.email;
+
+                        // Check if user exists
+                        let userDoc = await findUserByEmail(email, COLLECTIONS.USERS);
+
+                        if (!userDoc) {
+                            // Create new user document
+                            const userData = {
+                                id: userUid,
+                                uid: userUid,
+                                email: email.toLowerCase(),
+                                firstName: result.user.displayName?.split(' ')[0] || '',
+                                lastName: result.user.displayName?.split(' ').slice(1).join(' ') || '',
+                                userName: result.user.displayName?.replace(/\s+/g, '').toLowerCase() || '',
+                                profilePicture: result.user.photoURL || '',
+                                provider: providerType,
+                                role: USER_ROLES.USER,
+                                isActive: true,
+                                emailVerified: true,
+                                createdAt: serverTimestamp(),
+                                lastLogin: serverTimestamp()
+                            };
+
+                            await setDoc(doc(db, COLLECTIONS.USERS, userUid), userData);
+                            this.userProfile = userData;
+                        } else {
+                            // Update existing user
+                            const userDocRef = doc(db, COLLECTIONS.USERS, userUid);
+                            await updateDoc(userDocRef, {
+                                lastLogin: serverTimestamp()
+                            });
+
+                            this.userProfile = userDoc.data();
+                        }
+
+                        this.currentUser = result.user;
+                        this.userRole = USER_ROLES.USER;
+                        this.authChecked = true;
+
+                        // Update login history
+                        const deviceInfo = await collectDeviceInfo();
+                        await updateLoginHistory(userUid, { role: USER_ROLES.USER }, deviceInfo);
+
+                        // Return success
+                        return {
+                            user: result.user,
+                            success: true
+                        };
+
+                    } catch (error) {
+                        console.error('Social login error:', error);
+
+                        // ✅ NO Firebase error mapping needed!
+                        // Error formatter already handles: 'auth/popup-closed-by-user', etc.
+
+                        throw error; // Just re-throw
                     }
                 }
             );
@@ -426,23 +498,31 @@ export const useAuthStore = defineStore('auth', {
                 key,
                 async () => {
                     try {
+                        // First check if user exists in our database
+                        const userDoc = await findUserByEmail(email, COLLECTIONS.USERS);
+                        if (!userDoc) {
+                            throw new Error('No account found with this email address.');
+                        }
+
+                        // Check if user account is active
+                        const userData = userDoc.data();
+                        if (userData.isActive === false) {
+                            throw new Error('This account has been disabled.');
+                        }
+
                         await sendPasswordResetEmail(auth, email, {
                             url: `${window.location.origin}/auth/login`,
                             handleCodeInApp: false
                         });
-                        
-                        ElMessage.success('Password reset email sent!');
-                        return true;
-                        
+
+                        // Return success
+                        return {
+                            success: true,
+                            email: email
+                        };
+
                     } catch (error) {
                         console.error('Password reset error:', error);
-                        
-                        if (error.code === 'auth/user-not-found') {
-                            throw new Error('No account found with this email.');
-                        } else if (error.code === 'auth/too-many-requests') {
-                            throw new Error('Too many attempts. Please try again later.');
-                        }
-                        
                         throw error;
                     }
                 }
@@ -460,15 +540,15 @@ export const useAuthStore = defineStore('auth', {
                 key,
                 async () => {
                     const email = `${userId.trim().toLowerCase()}@gmail.com`;
-                    
+
                     // Check if admin exists
                     const employeeDoc = await findUserByEmail(email, COLLECTIONS.EMPLOYEES);
                     if (!employeeDoc) {
                         throw new Error('No admin account found with this user ID.');
                     }
-                    
+
                     const employeeData = employeeDoc.data();
-                    
+
                     // Check if admin is active
                     if (!employeeData.isActive) {
                         throw new Error('This admin account is disabled.');
@@ -481,9 +561,9 @@ export const useAuthStore = defineStore('auth', {
 
                     await sendSignInLinkToEmail(auth, email, actionCodeSettings);
 
-                    return { 
+                    return {
                         message: 'Login link sent to your email!',
-                        email: email 
+                        email: email
                     };
                 }
             );
@@ -525,29 +605,29 @@ export const useAuthStore = defineStore('auth', {
                         let userDoc = await findUserByEmail(email, COLLECTIONS.USERS);
                         let collectionName = COLLECTIONS.USERS;
                         let userRole = USER_ROLES.USER;
-                        
+
                         if (!userDoc) {
                             userDoc = await findUserByEmail(email, COLLECTIONS.EMPLOYEES);
                             collectionName = COLLECTIONS.EMPLOYEES;
                             userRole = USER_ROLES.ADMIN;
                         }
-                        
+
                         if (!userDoc) {
                             throw new Error("User profile not found");
                         }
-                        
+
                         const userData = userDoc.data();
-                        
+
                         // Migrate if needed
                         if (userData.requiresUidMigration) {
                             console.log('🔄 Migrating from temporary UID to real UID...');
                             await migrateToRealUid(userDoc.id, userUid, collectionName);
                         }
-                        
+
                         // Update login history
                         const deviceInfo = await collectDeviceInfo();
                         await updateLoginHistory(userUid, { role: userRole }, deviceInfo);
-                        
+
                         // Update last login
                         const finalDocRef = doc(db, collectionName, userUid);
                         await updateDoc(finalDocRef, {
@@ -555,28 +635,28 @@ export const useAuthStore = defineStore('auth', {
                             lastLoginIp: deviceInfo.ipAddress,
                             lastLoginLocation: deviceInfo.location
                         });
-                        
+
                         // Set auth state
                         this.currentUser = result.user;
                         this.userRole = userRole;
                         this.authChecked = true;
-                        
+
                         // Fetch user profile
                         this.userProfile = {
                             ...userData,
                             id: userUid,
                             uid: userUid
                         };
-                        
+
                         console.log(`🔐 ${userRole.toUpperCase()} sign-in completed successfully`);
-                        
+
                         // Redirect based on role
                         setTimeout(() => {
                             this.redirectToTargetApp();
                         }, 1500);
-                        
+
                         return result.user;
-                        
+
                     } catch (firebaseError) {
                         console.error('🔐 Firebase sign-in error:', firebaseError);
                         throw firebaseError;
@@ -616,33 +696,33 @@ export const useAuthStore = defineStore('auth', {
 
                         const userUid = result.user.uid;
                         console.log('🔐 User verified with UID:', userUid);
-                        
+
                         // Find and migrate user
                         const userDoc = await findUserByEmail(email, COLLECTIONS.USERS);
                         if (!userDoc) {
                             throw new Error("User profile not found");
                         }
-                        
+
                         const userData = userDoc.data();
-                        
+
                         // Migrate if needed
                         if (userData.requiresUidMigration) {
                             console.log('🔄 Migrating verified user...');
                             await migrateToRealUid(userDoc.id, userUid, COLLECTIONS.USERS);
                         }
-                        
+
                         // Update user as verified
                         const finalDocRef = doc(db, COLLECTIONS.USERS, userUid);
                         await updateDoc(finalDocRef, {
                             emailVerified: true,
                             verifiedAt: serverTimestamp()
                         });
-                        
+
                         // Set auth state
                         this.currentUser = result.user;
                         this.userRole = USER_ROLES.USER;
                         this.authChecked = true;
-                        
+
                         // Fetch user profile
                         this.userProfile = {
                             ...userData,
@@ -650,16 +730,16 @@ export const useAuthStore = defineStore('auth', {
                             uid: userUid,
                             emailVerified: true
                         };
-                        
+
                         console.log('✅ Email verification completed successfully');
-                        
+
                         // Redirect to main app
                         setTimeout(() => {
                             this.redirectToTargetApp();
                         }, 1500);
-                        
+
                         return result.user;
-                        
+
                     } catch (error) {
                         console.error('🔐 Email verification error:', error);
                         throw error;
@@ -671,93 +751,90 @@ export const useAuthStore = defineStore('auth', {
         /**
          * Social login
          */
-        async socialLogin(providerType) {
-            const uiStore = useUiStore();
-            const key = AUTH_OPERATIONS.SOCIAL_LOGIN;
+        // async socialLogin(providerType) {
+        //     const uiStore = useUiStore();
+        //     const key = AUTH_OPERATIONS.SOCIAL_LOGIN;
 
-            return await uiStore.withOperation(
-                key,
-                async () => {
-                    try {
-                        let provider;
-                        if (providerType === 'google') {
-                            provider = new GoogleAuthProvider();
-                        } else if (providerType === 'facebook') {
-                            provider = new FacebookAuthProvider();
-                        } else {
-                            throw new Error('Unsupported social provider');
-                        }
-                        
-                        const result = await signInWithPopup(auth, provider);
-                        const userUid = result.user.uid;
-                        const email = result.user.email;
-                        
-                        // Check if user exists
-                        let userDoc = await findUserByEmail(email, COLLECTIONS.USERS);
-                        
-                        if (!userDoc) {
-                            // Create new user document
-                            const userData = {
-                                id: userUid,
-                                uid: userUid,
-                                email: email.toLowerCase(),
-                                firstName: result.user.displayName?.split(' ')[0] || '',
-                                lastName: result.user.displayName?.split(' ').slice(1).join(' ') || '',
-                                userName: result.user.displayName?.replace(/\s+/g, '').toLowerCase() || '',
-                                profilePicture: result.user.photoURL || '',
-                                provider: providerType,
-                                role: USER_ROLES.USER,
-                                isActive: true,
-                                emailVerified: true,
-                                createdAt: serverTimestamp(),
-                                lastLogin: serverTimestamp()
-                            };
-                            
-                            await setDoc(doc(db, COLLECTIONS.USERS, userUid), userData);
-                            this.userProfile = userData;
-                        } else {
-                            // Update existing user
-                            const userDocRef = doc(db, COLLECTIONS.USERS, userUid);
-                            await updateDoc(userDocRef, {
-                                lastLogin: serverTimestamp()
-                            });
-                            
-                            this.userProfile = userDoc.data();
-                        }
-                        
-                        this.currentUser = result.user;
-                        this.userRole = USER_ROLES.USER;
-                        this.authChecked = true;
-                        
-                        // Update login history
-                        const deviceInfo = await collectDeviceInfo();
-                        await updateLoginHistory(userUid, { role: USER_ROLES.USER }, deviceInfo);
-                        
-                        ElMessage.success('Social login successful!');
-                        
-                        // Redirect to main app
-                        setTimeout(() => {
-                            this.redirectToTargetApp();
-                        }, 1500);
-                        
-                        return result.user;
-                        
-                    } catch (error) {
-                        console.error('Social login error:', error);
-                        
-                        if (error.code === 'auth/popup-closed-by-user') {
-                            throw new Error('Login popup was closed.');
-                        } else if (error.code === 'auth/popup-blocked') {
-                            throw new Error('Login popup was blocked by browser.');
-                        } else if (error.code === 'auth/account-exists-with-different-credential') {
-                            throw new Error('An account already exists with this email using a different login method.');
-                        }
-                        
-                        throw error;
-                    }
-                }
-            );
-        },
+        //     return await uiStore.withOperation(
+        //         key,
+        //         async () => {
+        //             try {
+        //                 let provider;
+        //                 if (providerType === 'google') {
+        //                     provider = new GoogleAuthProvider();
+        //                 } else if (providerType === 'facebook') {
+        //                     provider = new FacebookAuthProvider();
+        //                 } else {
+        //                     throw new Error('Unsupported social provider');
+        //                 }
+
+        //                 const result = await signInWithPopup(auth, provider);
+        //                 const userUid = result.user.uid;
+        //                 const email = result.user.email;
+
+        //                 // Check if user exists
+        //                 let userDoc = await findUserByEmail(email, COLLECTIONS.USERS);
+
+        //                 if (!userDoc) {
+        //                     // Create new user document
+        //                     const userData = {
+        //                         id: userUid,
+        //                         uid: userUid,
+        //                         email: email.toLowerCase(),
+        //                         firstName: result.user.displayName?.split(' ')[0] || '',
+        //                         lastName: result.user.displayName?.split(' ').slice(1).join(' ') || '',
+        //                         userName: result.user.displayName?.replace(/\s+/g, '').toLowerCase() || '',
+        //                         profilePicture: result.user.photoURL || '',
+        //                         provider: providerType,
+        //                         role: USER_ROLES.USER,
+        //                         isActive: true,
+        //                         emailVerified: true,
+        //                         createdAt: serverTimestamp(),
+        //                         lastLogin: serverTimestamp()
+        //                     };
+
+        //                     await setDoc(doc(db, COLLECTIONS.USERS, userUid), userData);
+        //                     this.userProfile = userData;
+        //                 } else {
+        //                     // Update existing user
+        //                     const userDocRef = doc(db, COLLECTIONS.USERS, userUid);
+        //                     await updateDoc(userDocRef, {
+        //                         lastLogin: serverTimestamp()
+        //                     });
+
+        //                     this.userProfile = userDoc.data();
+        //                 }
+
+        //                 this.currentUser = result.user;
+        //                 this.userRole = USER_ROLES.USER;
+        //                 this.authChecked = true;
+
+        //                 // Update login history
+        //                 const deviceInfo = await collectDeviceInfo();
+        //                 await updateLoginHistory(userUid, { role: USER_ROLES.USER }, deviceInfo);
+
+        //                 // Return success - NO MESSAGE HERE
+        //                 return {
+        //                     user: result.user,
+        //                     success: true
+        //                 };
+
+        //             } catch (error) {
+        //                 console.error('Social login error:', error);
+
+        //                 if (error.code === 'auth/popup-closed-by-user') {
+        //                     throw new Error('POPUP_CLOSED:Login popup was closed.');
+        //                 } else if (error.code === 'auth/popup-blocked') {
+        //                     throw new Error('POPUP_BLOCKED:Login popup was blocked by browser.');
+        //                 } else if (error.code === 'auth/account-exists-with-different-credential') {
+        //                     throw new Error('ACCOUNT_EXISTS:An account already exists with this email using a different login method.');
+        //                 }
+
+        //                 throw error;
+        //             }
+        //         }
+        //     );
+        // },
 
         /**
          * Fetch user profile
@@ -807,7 +884,7 @@ export const useAuthStore = defineStore('auth', {
                                 this.userProfile = null;
                                 this.userRole = null;
                             }
-                            
+
                             this.authChecked = true;
                             resolve(user);
                             unsubscribe();
@@ -832,66 +909,64 @@ export const useAuthStore = defineStore('auth', {
                     this.userProfile = null;
                     this.userRole = null;
                     this.authChecked = false;
-                    
+
                     // Clear cookie
                     clearAuthIntentCookie();
-                    
+
                     sessionStorage.clear();
                     localStorage.clear();
-                    
+
                     return { message: 'Logged out successfully' };
                 }
             );
         },
 
-        // In the redirectToTargetApp method, update to:
+        /**
+         * Redirect to target application based on user role
+         */
+        redirectToTargetApp() {
+            if (!this.userRole) {
+                console.error('Cannot redirect: No user role determined')
+                return
+            }
 
-/**
- * Redirect to target application based on user role
- */
-redirectToTargetApp() {
-    if (!this.userRole) {
-        console.error('Cannot redirect: No user role determined')
-        return
-    }
-    
-    // Get redirect URL from cookie or session
-    const cookieResult = getAuthIntentCookie()
-    let redirectUrl = '/'
-    
-    if (cookieResult.valid && cookieResult.data.redirectUrl) {
-        redirectUrl = cookieResult.data.redirectUrl
-    } else if (sessionStorage.getItem('authRedirectUrl')) {
-        redirectUrl = sessionStorage.getItem('authRedirectUrl')
-    }
-    
-    const targetDomain = getTargetDomain(this.userRole)
-    
-    // Build final URL - ensure it's for the correct domain
-    let finalUrl
-    try {
-        const url = new URL(redirectUrl)
-        // If redirect URL is already for the target domain, use it as-is
-        if (url.hostname.includes(targetDomain)) {
-            finalUrl = redirectUrl
-        } else {
-            // Otherwise, redirect to target domain home
-            finalUrl = `https://${targetDomain}/`
-        }
-    } catch (error) {
-        // If redirectUrl is not a valid URL, use target domain home
-        finalUrl = `https://${targetDomain}/`
-    }
-    
-    console.log(`🔄 [auth] Redirecting ${this.userRole} to: ${finalUrl}`)
-    
-    // Clear cookie after use
-    clearAuthIntentCookie()
-    sessionStorage.removeItem('authRedirectUrl')
-    
-    // Redirect
-    window.location.href = finalUrl
-},
+            // Get redirect URL from cookie or session
+            const cookieResult = getAuthIntentCookie()
+            let redirectUrl = '/'
+
+            if (cookieResult.valid && cookieResult.data.redirectUrl) {
+                redirectUrl = cookieResult.data.redirectUrl
+            } else if (sessionStorage.getItem('authRedirectUrl')) {
+                redirectUrl = sessionStorage.getItem('authRedirectUrl')
+            }
+
+            const targetDomain = getTargetDomain(this.userRole)
+
+            // Build final URL - ensure it's for the correct domain
+            let finalUrl
+            try {
+                const url = new URL(redirectUrl)
+                // If redirect URL is already for the target domain, use it as-is
+                if (url.hostname.includes(targetDomain)) {
+                    finalUrl = redirectUrl
+                } else {
+                    // Otherwise, redirect to target domain home
+                    finalUrl = `https://${targetDomain}/`
+                }
+            } catch (error) {
+                // If redirectUrl is not a valid URL, use target domain home
+                finalUrl = `https://${targetDomain}/`
+            }
+
+            console.log(`🔄 [auth] Redirecting ${this.userRole} to: ${finalUrl}`)
+
+            // Clear cookie after use
+            clearAuthIntentCookie()
+            sessionStorage.removeItem('authRedirectUrl')
+
+            // Redirect
+            window.location.href = finalUrl
+        },
 
         /**
          * Cleanup
@@ -901,12 +976,12 @@ redirectToTargetApp() {
                 this.unsubscribeAuthListener();
                 this.unsubscribeAuthListener = null;
             }
-            
+
             this.currentUser = null;
             this.userProfile = null;
             this.authChecked = false;
             this.userRole = null;
-            
+
             sessionStorage.clear();
             console.log('🔐 Auth store cleaned up');
         }

@@ -63,13 +63,14 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
-import { ElMessage } from 'element-plus'
+import { useMessage } from 'naive-ui'
 import { useAuthStore, AUTH_OPERATIONS } from '@/stores/authStore'
 import { useUiStore } from '@/stores/uiStore'
 import { formatFirebaseErrorForDisplay } from '@/utils/errorHelper'
 
 const authStore = useAuthStore()
 const uiStore = useUiStore()
+const message = useMessage()
 
 const signInSuccess = ref(false)
 
@@ -92,7 +93,7 @@ const handleSignIn = async () => {
         await authStore.completeSignIn(currentUrl)
         
         signInSuccess.value = true
-        ElMessage.success('Sign-in successful!')
+        message.success('Sign-in successful!')
         
     } catch (error) {
         console.error('Sign-in error:', error)
