@@ -87,17 +87,33 @@ const getRandomImage = () => {
     randomImage.value = images[randomIndex]
 }
 
+// In CompleteSignIn.vue or authStore.js redirectToTargetApp() method
 const handleSignIn = async () => {
     try {
         const currentUrl = window.location.href
-        await authStore.completeSignIn(currentUrl)
+        const user = await authStore.completeSignIn(currentUrl)
         
-        signInSuccess.value = true
-        message.success('Sign-in successful!')
+        // ✅ CRITICAL: Get ID token before redirect
+        const idToken = await user.getIdToken()
+        
+        // Build redirect URL with token
+        const cookieResult = getAuthIntentCookie()
+        let redirectUrl = cookieResult.valid ? cookieResult.data.redirectUrl : `https://${getTargetDomain(authStore.userRole)}/`
+        
+        // Add token to URL
+        const finalUrl = new URL(redirectUrl)
+        finalUrl.searchParams.set('authToken', idToken)
+        finalUrl.searchParams.set('uid', user.uid)
+        finalUrl.searchParams.set('source', 'auth.fansmeed.com')
+        
+        // Clear cookie
+        clearAuthIntentCookie()
+        
+        // Redirect with token
+        window.location.href = finalUrl.toString()
         
     } catch (error) {
         console.error('Sign-in error:', error)
-        // Error is handled by the store and displayed in the template
     }
 }
 

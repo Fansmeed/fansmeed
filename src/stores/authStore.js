@@ -30,7 +30,6 @@ import {
     setDoc,
     deleteDoc
 } from "firebase/firestore";
-import { setPersistence, browserLocalPersistence } from 'firebase/auth'
 import { collectDeviceInfo } from '@/utils/deviceInfo';
 import { getAuthIntentCookie, clearAuthIntentCookie, getTargetDomain } from '@/utils/cookieChecker';
 
@@ -594,9 +593,6 @@ export const useAuthStore = defineStore('auth', {
                     }
 
                     try {
-                                                await setPersistence(auth, browserLocalPersistence)
-
-                                                
                         const result = await signInWithEmailLink(auth, email, url);
                         if (!result.user) {
                             throw new Error("Sign-in failed: No user data received");
