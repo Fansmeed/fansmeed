@@ -924,84 +924,55 @@ export const useAuthStore = defineStore('auth', {
         /**
          * Redirect to target application based on user role
          */
-
-/**
- * Prepare cross-domain authentication via Firestore
- */
-async prepareCrossDomainAuth() {
-    try {
-        if (!this.currentUser) {
-            throw new Error('No authenticated user');
-        }
-        
-        // Get fresh ID token
-        const idToken = await this.currentUser.getIdToken(true);
-        const uid = this.currentUser.uid;
-        
-        // Generate a unique token ID
-        const tokenId = `token_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-        
-        // Store token in Firestore (temporary)
-        await setDoc(doc(db, 'authTokens', tokenId), {
-            idToken: idToken,
-            uid: uid,
-            userRole: this.userRole,
-            createdAt: serverTimestamp(),
-            expiresAt: new Date(Date.now() + 5 * 60 * 1000) // 5 minutes
-        });
-        
-        console.log('✅ Token stored in Firestore with ID:', tokenId);
-        return tokenId;
-    } catch (error) {
-        console.error('Error preparing cross-domain auth:', error);
-        throw error;
-    }
-},
-
-// 🔥 UPDATE THIS EXISTING METHOD - redirectToTargetApp() 🔥
-redirectToTargetApp() {
+        // 🔥 UPDATE THIS EXISTING METHOD - redirectToTargetApp() 🔥
+async redirectToTargetApp() {
     if (!this.userRole) {
         console.error('Cannot redirect: No user role determined');
         return;
     }
 
-    this.prepareCrossDomainAuth().then(tokenId => {
-        // Get redirect URL from cookie
-        const cookieResult = getAuthIntentCookie();
-        let redirectUrl = '/';
+    // Store auth data in localStorage for cross-domain sync
+    const authData = {
+        uid: this.currentUser.uid,
+        email: this.currentUser.email,
+        role: this.userRole,
+        timestamp: Date.now(),
+        idToken: await this.currentUser.getIdToken() // Get fresh token
+    };
+    
+    // Use localStorage for main domain
+    localStorage.setItem('fansmeed_auth_sync', JSON.stringify(authData));
+    
+    // Also set a cookie for immediate access
+    document.cookie = `fansmeed_auth_sync=${JSON.stringify(authData)}; domain=.fansmeed.com; path=/; max-age=60; samesite=none; secure`;
+    
+    // Get redirect URL from cookie
+    const cookieResult = getAuthIntentCookie();
+    let redirectUrl = '/';
 
-        if (cookieResult.valid && cookieResult.data.redirectUrl) {
-            redirectUrl = cookieResult.data.redirectUrl;
-        }
+    if (cookieResult.valid && cookieResult.data.redirectUrl) {
+        redirectUrl = cookieResult.data.redirectUrl;
+    }
 
-        const targetDomain = getTargetDomain(this.userRole);
-        
-        // Build final URL with token ID
-        let finalUrl;
-        try {
-            const url = new URL(redirectUrl);
-            finalUrl = redirectUrl;
-        } catch (error) {
-            finalUrl = `https://${targetDomain}/`;
-        }
-        
-        // Add token ID as URL parameter
-        const finalUrlObj = new URL(finalUrl);
-        finalUrlObj.searchParams.set('authTokenId', tokenId);
-        finalUrlObj.searchParams.set('source', 'auth.fansmeed.com');
-        
-        console.log(`🔄 [auth] Redirecting ${this.userRole} with token ID: ${tokenId}`);
-        
-        // Clear cookie after use
-        clearAuthIntentCookie();
-        
-        // Redirect with token ID
-        window.location.href = finalUrlObj.toString();
-    }).catch(error => {
-        console.error('Failed to prepare cross-domain auth:', error);
-        // Fallback without token
-        window.location.href = `https://${getTargetDomain(this.userRole)}/`;
-    });
+    const targetDomain = getTargetDomain(this.userRole);
+    
+    let finalUrl;
+    try {
+        const url = new URL(redirectUrl);
+        finalUrl = redirectUrl;
+    } catch (error) {
+        finalUrl = `https://${targetDomain}/`;
+    }
+    
+    console.log(`🔄 [auth] Redirecting ${this.userRole} with localStorage sync`);
+    
+    // Clear intent cookie
+    clearAuthIntentCookie();
+    
+    // Small delay to ensure localStorage is set
+    setTimeout(() => {
+        window.location.href = finalUrl;
+    }, 100);
 },
 
         /**
