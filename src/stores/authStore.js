@@ -924,49 +924,85 @@ export const useAuthStore = defineStore('auth', {
         /**
          * Redirect to target application based on user role
          */
-        redirectToTargetApp() {
-            if (!this.userRole) {
-                console.error('Cannot redirect: No user role determined')
-                return
-            }
 
-            // Get redirect URL from cookie or session
-            const cookieResult = getAuthIntentCookie()
-            let redirectUrl = '/'
+/**
+ * Prepare cross-domain authentication via Firestore
+ */
+async prepareCrossDomainAuth() {
+    try {
+        if (!this.currentUser) {
+            throw new Error('No authenticated user');
+        }
+        
+        // Get fresh ID token
+        const idToken = await this.currentUser.getIdToken(true);
+        const uid = this.currentUser.uid;
+        
+        // Generate a unique token ID
+        const tokenId = `token_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        
+        // Store token in Firestore (temporary)
+        await setDoc(doc(db, 'authTokens', tokenId), {
+            idToken: idToken,
+            uid: uid,
+            userRole: this.userRole,
+            createdAt: serverTimestamp(),
+            expiresAt: new Date(Date.now() + 5 * 60 * 1000) // 5 minutes
+        });
+        
+        console.log('✅ Token stored in Firestore with ID:', tokenId);
+        return tokenId;
+    } catch (error) {
+        console.error('Error preparing cross-domain auth:', error);
+        throw error;
+    }
+},
 
-            if (cookieResult.valid && cookieResult.data.redirectUrl) {
-                redirectUrl = cookieResult.data.redirectUrl
-            } else if (sessionStorage.getItem('authRedirectUrl')) {
-                redirectUrl = sessionStorage.getItem('authRedirectUrl')
-            }
+// 🔥 UPDATE THIS EXISTING METHOD - redirectToTargetApp() 🔥
+redirectToTargetApp() {
+    if (!this.userRole) {
+        console.error('Cannot redirect: No user role determined');
+        return;
+    }
 
-            const targetDomain = getTargetDomain(this.userRole)
+    this.prepareCrossDomainAuth().then(tokenId => {
+        // Get redirect URL from cookie
+        const cookieResult = getAuthIntentCookie();
+        let redirectUrl = '/';
 
-            // Build final URL - ensure it's for the correct domain
-            let finalUrl
-            try {
-                const url = new URL(redirectUrl)
-                // If redirect URL is already for the target domain, use it as-is
-                if (url.hostname.includes(targetDomain)) {
-                    finalUrl = redirectUrl
-                } else {
-                    // Otherwise, redirect to target domain home
-                    finalUrl = `https://${targetDomain}/`
-                }
-            } catch (error) {
-                // If redirectUrl is not a valid URL, use target domain home
-                finalUrl = `https://${targetDomain}/`
-            }
+        if (cookieResult.valid && cookieResult.data.redirectUrl) {
+            redirectUrl = cookieResult.data.redirectUrl;
+        }
 
-            console.log(`🔄 [auth] Redirecting ${this.userRole} to: ${finalUrl}`)
-
-            // Clear cookie after use
-            clearAuthIntentCookie()
-            sessionStorage.removeItem('authRedirectUrl')
-
-            // Redirect
-            window.location.href = finalUrl
-        },
+        const targetDomain = getTargetDomain(this.userRole);
+        
+        // Build final URL with token ID
+        let finalUrl;
+        try {
+            const url = new URL(redirectUrl);
+            finalUrl = redirectUrl;
+        } catch (error) {
+            finalUrl = `https://${targetDomain}/`;
+        }
+        
+        // Add token ID as URL parameter
+        const finalUrlObj = new URL(finalUrl);
+        finalUrlObj.searchParams.set('authTokenId', tokenId);
+        finalUrlObj.searchParams.set('source', 'auth.fansmeed.com');
+        
+        console.log(`🔄 [auth] Redirecting ${this.userRole} with token ID: ${tokenId}`);
+        
+        // Clear cookie after use
+        clearAuthIntentCookie();
+        
+        // Redirect with token ID
+        window.location.href = finalUrlObj.toString();
+    }).catch(error => {
+        console.error('Failed to prepare cross-domain auth:', error);
+        // Fallback without token
+        window.location.href = `https://${getTargetDomain(this.userRole)}/`;
+    });
+},
 
         /**
          * Cleanup
