@@ -924,56 +924,49 @@ export const useAuthStore = defineStore('auth', {
         /**
          * Redirect to target application based on user role
          */
-        // 🔥 UPDATE THIS EXISTING METHOD - redirectToTargetApp() 🔥
-async redirectToTargetApp() {
-    if (!this.userRole) {
-        console.error('Cannot redirect: No user role determined');
-        return;
-    }
+        redirectToTargetApp() {
+            if (!this.userRole) {
+                console.error('Cannot redirect: No user role determined')
+                return
+            }
 
-    // Store auth data in localStorage for cross-domain sync
-    const authData = {
-        uid: this.currentUser.uid,
-        email: this.currentUser.email,
-        role: this.userRole,
-        timestamp: Date.now(),
-        idToken: await this.currentUser.getIdToken() // Get fresh token
-    };
-    
-    // Use localStorage for main domain
-    localStorage.setItem('fansmeed_auth_sync', JSON.stringify(authData));
-    
-    // Also set a cookie for immediate access
-    document.cookie = `fansmeed_auth_sync=${JSON.stringify(authData)}; domain=.fansmeed.com; path=/; max-age=60; samesite=none; secure`;
-    
-    // Get redirect URL from cookie
-    const cookieResult = getAuthIntentCookie();
-    let redirectUrl = '/';
+            // Get redirect URL from cookie or session
+            const cookieResult = getAuthIntentCookie()
+            let redirectUrl = '/'
 
-    if (cookieResult.valid && cookieResult.data.redirectUrl) {
-        redirectUrl = cookieResult.data.redirectUrl;
-    }
+            if (cookieResult.valid && cookieResult.data.redirectUrl) {
+                redirectUrl = cookieResult.data.redirectUrl
+            } else if (sessionStorage.getItem('authRedirectUrl')) {
+                redirectUrl = sessionStorage.getItem('authRedirectUrl')
+            }
 
-    const targetDomain = getTargetDomain(this.userRole);
-    
-    let finalUrl;
-    try {
-        const url = new URL(redirectUrl);
-        finalUrl = redirectUrl;
-    } catch (error) {
-        finalUrl = `https://${targetDomain}/`;
-    }
-    
-    console.log(`🔄 [auth] Redirecting ${this.userRole} with localStorage sync`);
-    
-    // Clear intent cookie
-    clearAuthIntentCookie();
-    
-    // Small delay to ensure localStorage is set
-    setTimeout(() => {
-        window.location.href = finalUrl;
-    }, 100);
-},
+            const targetDomain = getTargetDomain(this.userRole)
+
+            // Build final URL - ensure it's for the correct domain
+            let finalUrl
+            try {
+                const url = new URL(redirectUrl)
+                // If redirect URL is already for the target domain, use it as-is
+                if (url.hostname.includes(targetDomain)) {
+                    finalUrl = redirectUrl
+                } else {
+                    // Otherwise, redirect to target domain home
+                    finalUrl = `https://${targetDomain}/`
+                }
+            } catch (error) {
+                // If redirectUrl is not a valid URL, use target domain home
+                finalUrl = `https://${targetDomain}/`
+            }
+
+            console.log(`🔄 [auth] Redirecting ${this.userRole} to: ${finalUrl}`)
+
+            // Clear cookie after use
+            clearAuthIntentCookie()
+            sessionStorage.removeItem('authRedirectUrl')
+
+            // Redirect
+            window.location.href = finalUrl
+        },
 
         /**
          * Cleanup
