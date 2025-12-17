@@ -68,8 +68,6 @@ import { useAuthStore, AUTH_OPERATIONS } from '@/stores/authStore'
 import { useUiStore } from '@/stores/uiStore'
 import { formatFirebaseErrorForDisplay } from '@/utils/errorHelper'
 import { getAuthIntentCookie, clearAuthIntentCookie, getTargetDomain } from '@/utils/cookieChecker'
-import { httpsCallable } from 'firebase/functions'
-import { functions } from '@/firebase/firebaseInit'
 
 const authStore = useAuthStore()
 const uiStore = useUiStore()
@@ -100,34 +98,63 @@ const handleSignIn = async () => {
         let redirectUrl = cookieResult.valid ? cookieResult.data.redirectUrl : 
                          `https://${getTargetDomain(authStore.userRole)}/`
         
-        console.log('🔐 Generating custom token for cross-domain auth...')
+        console.log('🔐 Starting cross-domain auth flow...')
         
-        // ✅ Call cloud function to generate custom token
-        const generateCustomToken = httpsCallable(functions, 'generateCustomToken')
-        const result = await generateCustomToken({
+        // ✅ Create unique session ID
+        const sessionId = `sess_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+        
+        // ✅ Get user's ID token
+        const idToken = await user.getIdToken(true)
+        
+        // ✅ Store auth session in Firestore
+        await storeAuthSession(sessionId, {
             uid: user.uid,
             email: user.email,
+            idToken: idToken,
             userRole: authStore.userRole,
-            redirectUrl: redirectUrl
+            redirectUrl: redirectUrl,
+            status: 'pending',
+            createdAt: Date.now(),
+            expiresAt: Date.now() + 300000 // 5 minutes
         })
         
-        const { customToken } = result.data
-        
-        // ✅ Build final URL with token
+        // ✅ Build final URL with session ID
         const finalUrl = new URL(redirectUrl)
-        finalUrl.searchParams.set('customToken', customToken)
+        finalUrl.searchParams.set('authSession', sessionId)
         finalUrl.searchParams.set('source', 'auth.fansmeed.com')
         
         // Clear cookie
         clearAuthIntentCookie()
         
-        // Redirect with token
-        console.log('🔄 Redirecting with custom token')
-        window.location.href = finalUrl.toString()
+        // Mark success for UI
+        signInSuccess.value = true
+        
+        // Redirect after short delay
+        setTimeout(() => {
+            console.log('🔄 Redirecting with session ID:', sessionId)
+            window.location.href = finalUrl.toString()
+        }, 1500)
         
     } catch (error) {
         console.error('Sign-in error:', error)
         uiStore.setError(AUTH_OPERATIONS.COMPLETE_SIGN_IN, error)
+    }
+}
+
+/**
+ * Store auth session in Firestore
+ */
+async function storeAuthSession(sessionId, sessionData) {
+    try {
+        const { db } = await import('@/firebase/firebaseInit')
+        const { doc, setDoc } = await import('firebase/firestore')
+        
+        await setDoc(doc(db, 'crossDomainAuth', sessionId), sessionData)
+        console.log('✅ Auth session stored in Firestore:', sessionId)
+        
+    } catch (error) {
+        console.error('❌ Failed to store auth session:', error)
+        throw error
     }
 }
 
