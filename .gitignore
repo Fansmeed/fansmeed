@@ -20,6 +20,16 @@ coverage
 # Markdown files
 *.md
 
+# Firebase / Google Cloud secrets
+serviceAccountKey.json
+*.serviceAccount.json
+.env
+.env.*
+functions/serviceAccountKey.json
+functions/*.json
+
+
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
