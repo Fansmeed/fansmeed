@@ -67,7 +67,8 @@ import { useMessage } from 'naive-ui'
 import { useAuthStore, AUTH_OPERATIONS } from '@/stores/authStore'
 import { useUiStore } from '@/stores/uiStore'
 import { formatFirebaseErrorForDisplay } from '@/utils/errorHelper'
-
+import { getAuthIntentCookie, clearAuthIntentCookie, getTargetDomain } from '@/utils/cookieChecker'
+import { createCrossDomainToken } from '@/utils/tokenExchange' // You need to create this file
 const authStore = useAuthStore()
 const uiStore = useUiStore()
 const message = useMessage()
@@ -88,13 +89,12 @@ const getRandomImage = () => {
 }
 
 // In CompleteSignIn.vue or authStore.js redirectToTargetApp() method
-// Update the handleSignIn function:
 const handleSignIn = async () => {
     try {
         const currentUrl = window.location.href
         const user = await authStore.completeSignIn(currentUrl)
         
-        // ✅ Get redirect URL from cookie
+        // ✅ FIX: Now getAuthIntentCookie should be defined
         const cookieResult = getAuthIntentCookie()
         let redirectUrl = cookieResult.valid ? cookieResult.data.redirectUrl : 
                          `https://${getTargetDomain(authStore.userRole)}/`
