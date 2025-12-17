@@ -68,7 +68,9 @@ import { useAuthStore, AUTH_OPERATIONS } from '@/stores/authStore'
 import { useUiStore } from '@/stores/uiStore'
 import { formatFirebaseErrorForDisplay } from '@/utils/errorHelper'
 import { getAuthIntentCookie, clearAuthIntentCookie, getTargetDomain } from '@/utils/cookieChecker'
-import { createCrossDomainToken } from '@/utils/tokenExchange' // You need to create this file
+import { httpsCallable } from 'firebase/functions'
+import { functions } from '@/firebase/firebaseInit'
+
 const authStore = useAuthStore()
 const uiStore = useUiStore()
 const message = useMessage()
@@ -88,40 +90,44 @@ const getRandomImage = () => {
     randomImage.value = images[randomIndex]
 }
 
-// In CompleteSignIn.vue or authStore.js redirectToTargetApp() method
 const handleSignIn = async () => {
     try {
         const currentUrl = window.location.href
         const user = await authStore.completeSignIn(currentUrl)
         
-        // ✅ FIX: Now getAuthIntentCookie should be defined
+        // ✅ Get redirect URL from cookie
         const cookieResult = getAuthIntentCookie()
         let redirectUrl = cookieResult.valid ? cookieResult.data.redirectUrl : 
                          `https://${getTargetDomain(authStore.userRole)}/`
         
-        // ✅ Create cross-domain token
-        const { token, tokenId } = await createCrossDomainToken(
-            user, 
-            redirectUrl, 
-            authStore.userRole
-        )
+        console.log('🔐 Generating custom token for cross-domain auth...')
+        
+        // ✅ Call cloud function to generate custom token
+        const generateCustomToken = httpsCallable(functions, 'generateCustomToken')
+        const result = await generateCustomToken({
+            uid: user.uid,
+            email: user.email,
+            userRole: authStore.userRole,
+            redirectUrl: redirectUrl
+        })
+        
+        const { customToken } = result.data
         
         // ✅ Build final URL with token
         const finalUrl = new URL(redirectUrl)
-        finalUrl.searchParams.set('authToken', token)
-        finalUrl.searchParams.set('tokenId', tokenId)
+        finalUrl.searchParams.set('customToken', customToken)
         finalUrl.searchParams.set('source', 'auth.fansmeed.com')
-        finalUrl.searchParams.set('timestamp', Date.now())
         
         // Clear cookie
         clearAuthIntentCookie()
         
         // Redirect with token
-        console.log('🔄 Redirecting with cross-domain token')
+        console.log('🔄 Redirecting with custom token')
         window.location.href = finalUrl.toString()
         
     } catch (error) {
         console.error('Sign-in error:', error)
+        uiStore.setError(AUTH_OPERATIONS.COMPLETE_SIGN_IN, error)
     }
 }
 
