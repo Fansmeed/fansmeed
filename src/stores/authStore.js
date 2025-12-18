@@ -191,6 +191,7 @@ function getRedirectUrl() {
 }
 
 
+// REPLACE the existing writeAuthToFirestore function with this:
 async function writeAuthToFirestore(user, userRole) {
     try {
         const currentTime = Date.now();
@@ -202,12 +203,17 @@ async function writeAuthToFirestore(user, userRole) {
 
         // Get redirect URL from cookie
         const cookieResult = getAuthIntentCookie();
-        let redirectUrl = '/';
-        let targetDomain = 'fansmeed.com';
+        let redirectUrl = 'https://' + (userRole === 'admin' ? 'cp.fansmeed.com' : 'fansmeed.com');
+        let targetDomain = userRole === 'admin' ? 'cp.fansmeed.com' : 'fansmeed.com';
 
-        if (cookieResult.valid) {
-            redirectUrl = cookieResult.data.redirectUrl;
-            targetDomain = userRole === 'admin' ? 'cp.fansmeed.com' : 'fansmeed.com';
+        if (cookieResult.valid && cookieResult.data.redirectUrl) {
+            try {
+                const url = new URL(cookieResult.data.redirectUrl);
+                // Use the original redirect URL
+                redirectUrl = cookieResult.data.redirectUrl;
+            } catch (error) {
+                console.log('Using default redirect URL');
+            }
         }
 
         // Create auth document in Firestore
@@ -219,7 +225,7 @@ async function writeAuthToFirestore(user, userRole) {
             source: 'auth.fansmeed.com',
             targetDomain,
             expiresAt: new Date(expiresAt),
-            createdAt: serverTimestamp(),
+            createdAt: new Date(),
             used: false,
             uid: user.uid
         };
@@ -228,8 +234,12 @@ async function writeAuthToFirestore(user, userRole) {
         await setDoc(doc(db, 'crossDomainAuth', user.uid), authData);
 
         console.log('✅ Auth data written to Firestore for cross-domain access');
+        console.log('📄 Auth data:', {
+            uid: user.uid,
+            redirectUrl,
+            targetDomain
+        });
 
-        // Return the UID for the target domain to poll
         return {
             uid: user.uid,
             redirectUrl,
@@ -976,6 +986,9 @@ export const useAuthStore = defineStore('auth', {
         /**
          * Redirect to target application based on user role
          */
+
+
+        // REPLACE the redirectToTargetApp method with this:
         async redirectToTargetApp() {
             if (!this.userRole || !this.currentUser) {
                 console.error('Cannot redirect: No user role or user determined');
@@ -984,7 +997,7 @@ export const useAuthStore = defineStore('auth', {
 
             try {
                 // Write auth data to Firestore
-                const { uid, redirectUrl, targetDomain } = await writeAuthToFirestore(
+                const { uid, redirectUrl } = await writeAuthToFirestore(
                     this.currentUser,
                     this.userRole
                 );

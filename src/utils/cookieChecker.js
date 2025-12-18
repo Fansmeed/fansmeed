@@ -301,3 +301,16 @@ export function buildRedirectUrl(userRole, redirectFromCookie = null) {
     
     return `https://${targetDomain}${redirectPath}`;
 }
+
+
+export function buildCrossDomainRedirectUrl(userRole, authRequestId) {
+    const targetDomain = getTargetDomain(userRole);
+    const baseUrl = `https://${targetDomain}/`;
+    
+    // Add auth request ID to URL
+    const url = new URL(baseUrl);
+    url.searchParams.set('authRequestId', authRequestId);
+    url.searchParams.set('source', 'auth.fansmeed.com');
+    
+    return url.toString();
+}
