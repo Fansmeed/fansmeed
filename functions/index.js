@@ -9,3 +9,7 @@ setGlobalOptions({
 // Cross-domain authentication functions
 const generateCustomToken = require('./generateCustomToken');
 exports.generateCustomToken = generateCustomToken.generateCustomTokenCallable;
+
+const verifySession = require('./verifySession');
+exports.verifySession = verifySession.verifySessionCallable;
+

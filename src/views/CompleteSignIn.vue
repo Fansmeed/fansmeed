@@ -61,61 +61,68 @@
     </div>
 </template>
 
+
 <script setup>
 import { ref, onMounted } from 'vue'
-import { useMessage } from 'naive-ui'
 import { useAuthStore, AUTH_OPERATIONS } from '@/stores/authStore'
 import { useUiStore } from '@/stores/uiStore'
-import { formatFirebaseErrorForDisplay } from '@/utils/errorHelper'
-import { getAuthIntentCookie, clearAuthIntentCookie, getTargetDomain } from '@/utils/cookieChecker'
-import { createAuthToken } from '@/firebase/tokenExchange';
+import { createAuthSession } from '@/firebase/authSync'
+import { getAuthIntentCookie, clearAuthIntentCookie } from '@/utils/cookieChecker'
 
 const authStore = useAuthStore()
 const uiStore = useUiStore()
-const message = useMessage()
-
 const signInSuccess = ref(false)
-const storeError = ref(null)
 
 const handleSignIn = async () => {
     try {
         const currentUrl = window.location.href;
         const user = await authStore.completeSignIn(currentUrl);
         
-        // Get the target domain from cookie
-        const cookieResult = getAuthIntentCookie();
-        let targetDomain = 'fansmeed.com'; // Default
-        let redirectPath = '/'; // Default
+        if (!user || !user.uid) {
+            throw new Error('No user data received');
+        }
         
-        if (cookieResult.valid) {
-            try {
-                const redirectUrl = new URL(cookieResult.data.redirectUrl);
-                targetDomain = redirectUrl.hostname;
-                redirectPath = redirectUrl.pathname + redirectUrl.search;
-            } catch (e) {
-                console.warn('Invalid redirect URL in cookie, using defaults');
-            }
-        } else if (authStore.userRole === 'admin') {
+        // Get target domain from cookie
+        const cookieResult = getAuthIntentCookie();
+        let targetDomain = 'fansmeed.com';
+        
+        if (cookieResult.valid && cookieResult.data.userRole === 'admin') {
             targetDomain = 'cp.fansmeed.com';
         }
         
-        // Create token in Firestore
-        const tokenId = await createAuthToken(user, targetDomain);
+        // Create session in Firestore
+        const sessionId = await createAuthSession(user.uid, targetDomain);
         
-        // Build redirect URL with token
-        const finalUrl = new URL(`https://${targetDomain}${redirectPath}`);
-        finalUrl.searchParams.set('authToken', tokenId);
+        // Build redirect URL
+        let redirectUrl = `https://${targetDomain}/`;
+        
+        if (cookieResult.valid && cookieResult.data.redirectUrl) {
+            try {
+                const url = new URL(cookieResult.data.redirectUrl);
+                if (url.hostname.includes(targetDomain)) {
+                    redirectUrl = cookieResult.data.redirectUrl;
+                }
+            } catch (e) {
+                console.warn('Invalid redirect URL:', e);
+            }
+        }
+        
+        // Add session ID to redirect URL
+        const finalUrl = new URL(redirectUrl);
+        finalUrl.searchParams.set('sessionId', sessionId);
         finalUrl.searchParams.set('source', 'auth.fansmeed.com');
-        finalUrl.searchParams.set('timestamp', Date.now().toString());
         
         // Clear cookie
         clearAuthIntentCookie();
         
-        console.log('✅ Redirecting with token:', tokenId);
-        console.log('✅ Target URL:', finalUrl.toString());
+        console.log('✅ Redirecting to:', finalUrl.toString());
         
-        // Redirect immediately
-        window.location.href = finalUrl.toString();
+        // Set success state and redirect after brief delay
+        signInSuccess.value = true;
+        
+        setTimeout(() => {
+            window.location.href = finalUrl.toString();
+        }, 1500);
         
     } catch (error) {
         console.error('Sign-in error:', error);
@@ -123,77 +130,7 @@ const handleSignIn = async () => {
     }
 }
 
-/**
- * Store auth session in Firestore - FIXED VERSION
- */
-async function storeAuthSession(sessionId, sessionData) {
-    try {
-        console.log('🔄 Storing session in Firestore...')
-        
-        // Import Firebase modules
-        const { db } = await import('@/firebase/firebaseInit')
-        const { doc, setDoc } = await import('firebase/firestore')
-        
-        console.log('🔄 Firestore import successful')
-        
-        // Store in Firestore
-        await setDoc(doc(db, 'crossDomainAuth', sessionId), sessionData)
-        
-        console.log('✅ Auth session stored in Firestore:', sessionId)
-        console.log('✅ Collection: crossDomainAuth, Document ID:', sessionId)
-        
-        return true
-        
-    } catch (error) {
-        console.error('❌ Firestore storage failed:', error)
-        console.error('❌ Error details:', error.code, error.message)
-        throw error
-    }
-}
-
-/**
- * LocalStorage fallback if Firestore fails
- */
-async function localStorageFallback(user, redirectUrl) {
-    try {
-        // Create a simpler session
-        const fallbackSession = {
-            uid: user.uid,
-            email: user.email,
-            userRole: authStore.userRole,
-            timestamp: Date.now(),
-            fallback: true
-        }
-        
-        // Store in localStorage with unique key
-        const fallbackKey = `fallback_auth_${Date.now()}`
-        localStorage.setItem(fallbackKey, JSON.stringify(fallbackSession))
-        
-        // Build URL with fallback key
-        const finalUrl = new URL(redirectUrl)
-        finalUrl.searchParams.set('fallbackKey', fallbackKey)
-        finalUrl.searchParams.set('source', 'auth.fansmeed.com')
-        
-        clearAuthIntentCookie()
-        
-        // Redirect immediately
-        console.log('🔄 Using localStorage fallback, redirecting...')
-        window.location.href = finalUrl.toString()
-        
-    } catch (error) {
-        console.error('❌ LocalStorage fallback also failed:', error)
-        uiStore.setError(AUTH_OPERATIONS.COMPLETE_SIGN_IN, 
-            new Error('Failed to store authentication session. Please try again.'))
-    }
-}
-
-const formatErrorForDisplay = (error) => {
-    if (!error) return ''
-    return formatFirebaseErrorForDisplay(error.message || error.toString())
-}
-
-// Initialize
 onMounted(() => {
-    handleSignIn()
+    handleSignIn();
 })
 </script>

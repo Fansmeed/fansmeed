@@ -118,7 +118,7 @@ export function setAuthIntentCookie(userRole, redirectUrl) {
                            `domain=${COOKIE_CONFIG.DOMAIN}; ` +
                            `path=${COOKIE_CONFIG.PATH}; ` +
                            `max-age=${COOKIE_CONFIG.MAX_AGE}; ` +
-                           `secure=${COOKIE_CONFIG.SECURE}; ` +
+                           `secure; ` +
                            `samesite=${COOKIE_CONFIG.SAMESITE}`;
         
         console.log('🍪 [auth] Setting cookie:', cookieString);
