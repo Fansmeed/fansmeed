@@ -7,7 +7,5 @@ setGlobalOptions({
 });
 
 // Cross-domain authentication functions
-const crossDomainAuth = require('./cross-domain-auth/customTokenGenerator');
-exports.generateCustomToken = crossDomainAuth.generateCustomToken;
-exports.validateCustomToken = crossDomainAuth.validateCustomToken;
-exports.deleteCustomToken = crossDomainAuth.deleteCustomToken;
+const generateCustomToken = require('./generateCustomToken');
+exports.generateCustomToken = generateCustomToken.generateCustomTokenCallable;

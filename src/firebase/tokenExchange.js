@@ -1,45 +1,31 @@
 import { db } from './firebaseInit';
-import { doc, setDoc, getDoc, deleteDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
 
 const TOKEN_COLLECTION = 'auth_tokens';
 const TOKEN_EXPIRY = 60; // 60 seconds
 
 /**
- * Get and validate an auth token
+ * Create an authentication session in Firestore
  */
-export async function getAuthToken(tokenId) {
+export async function createAuthSession(user, targetDomain) {
     try {
-        console.log('🔐 Getting auth token:', tokenId);
+        const sessionId = `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
         
-        const tokenDoc = await getDoc(doc(db, TOKEN_COLLECTION, tokenId));
+        const sessionData = {
+            userId: user.uid,
+            email: user.email,
+            userRole: targetDomain.includes('cp.') ? 'admin' : 'user',
+            targetDomain: targetDomain,
+            expiresAt: new Date(Date.now() + (TOKEN_EXPIRY * 1000)),
+            createdAt: serverTimestamp(),
+            status: 'pending'
+        };
+
+        await setDoc(doc(db, TOKEN_COLLECTION, sessionId), sessionData);
         
-        if (!tokenDoc.exists()) {
-            throw new Error('Token not found');
-        }
-        
-        const tokenData = tokenDoc.data();
-        console.log('🔐 Token data retrieved:', { 
-            userId: tokenData.userId,
-            targetDomain: tokenData.targetDomain 
-        });
-        
-        // Check if token is expired
-        if (tokenData.expiresAt && new Date() > tokenData.expiresAt.toDate()) {
-            await deleteDoc(doc(db, TOKEN_COLLECTION, tokenId));
-            throw new Error('Token expired');
-        }
-        
-        // Delete token immediately after reading (one-time use)
-        try {
-            await deleteDoc(doc(db, TOKEN_COLLECTION, tokenId));
-            console.log('✅ Token deleted after use');
-        } catch (deleteError) {
-            console.warn('Could not delete token (may already be deleted):', deleteError);
-        }
-        
-        return tokenData;
+        return sessionId;
     } catch (error) {
-        console.error('❌ Error getting auth token:', error);
+        console.error('Error creating auth session:', error);
         throw error;
     }
 }
