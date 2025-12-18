@@ -192,6 +192,7 @@ function getRedirectUrl() {
 
 
 // REPLACE the existing writeAuthToFirestore function with this:
+// REPLACE the writeAuthToFirestore function with this simpler version:
 async function writeAuthToFirestore(user, userRole) {
     try {
         const currentTime = Date.now();
@@ -204,12 +205,10 @@ async function writeAuthToFirestore(user, userRole) {
         // Get redirect URL from cookie
         const cookieResult = getAuthIntentCookie();
         let redirectUrl = 'https://' + (userRole === 'admin' ? 'cp.fansmeed.com' : 'fansmeed.com');
-        let targetDomain = userRole === 'admin' ? 'cp.fansmeed.com' : 'fansmeed.com';
 
         if (cookieResult.valid && cookieResult.data.redirectUrl) {
             try {
                 const url = new URL(cookieResult.data.redirectUrl);
-                // Use the original redirect URL
                 redirectUrl = cookieResult.data.redirectUrl;
             } catch (error) {
                 console.log('Using default redirect URL');
@@ -223,7 +222,7 @@ async function writeAuthToFirestore(user, userRole) {
             userRole,
             redirectUrl,
             source: 'auth.fansmeed.com',
-            targetDomain,
+            targetDomain: userRole === 'admin' ? 'cp.fansmeed.com' : 'fansmeed.com',
             expiresAt: new Date(expiresAt),
             createdAt: new Date(),
             used: false,
@@ -234,16 +233,12 @@ async function writeAuthToFirestore(user, userRole) {
         await setDoc(doc(db, 'crossDomainAuth', user.uid), authData);
 
         console.log('✅ Auth data written to Firestore for cross-domain access');
-        console.log('📄 Auth data:', {
-            uid: user.uid,
-            redirectUrl,
-            targetDomain
-        });
-
+        
         return {
             uid: user.uid,
             redirectUrl,
-            targetDomain
+            targetDomain: userRole === 'admin' ? 'cp.fansmeed.com' : 'fansmeed.com',
+            idToken // RETURN THE TOKEN
         };
 
     } catch (error) {
@@ -251,6 +246,7 @@ async function writeAuthToFirestore(user, userRole) {
         throw error;
     }
 }
+
 
 export const useAuthStore = defineStore('auth', {
     state: () => ({
@@ -990,45 +986,49 @@ export const useAuthStore = defineStore('auth', {
 
         // REPLACE the redirectToTargetApp method with this:
         async redirectToTargetApp() {
-            if (!this.userRole || !this.currentUser) {
-                console.error('Cannot redirect: No user role or user determined');
-                return;
-            }
+    if (!this.userRole || !this.currentUser) {
+        console.error('Cannot redirect: No user role or user determined');
+        return;
+    }
 
-            try {
-                // Write auth data to Firestore
-                const { uid, redirectUrl } = await writeAuthToFirestore(
-                    this.currentUser,
-                    this.userRole
-                );
+    try {
+        // Write auth data to Firestore
+        const { uid, redirectUrl, idToken } = await writeAuthToFirestore(
+            this.currentUser,
+            this.userRole
+        );
 
-                // Clear cookie
-                clearAuthIntentCookie();
+        // Clear cookie
+        clearAuthIntentCookie();
 
-                // Build redirect URL with UID parameter
-                const finalUrl = new URL(redirectUrl);
-                finalUrl.searchParams.set('authRequestId', uid);
-                finalUrl.searchParams.set('source', 'auth.fansmeed.com');
+        // Build redirect URL with ALL auth data in URL parameters
+        const finalUrl = new URL(redirectUrl);
+        finalUrl.searchParams.set('authRequestId', uid);
+        finalUrl.searchParams.set('source', 'auth.fansmeed.com');
+        finalUrl.searchParams.set('authToken', idToken); // ADD TOKEN TO URL
+        finalUrl.searchParams.set('authRole', this.userRole);
+        finalUrl.searchParams.set('authUid', uid);
+        finalUrl.searchParams.set('timestamp', Date.now().toString());
 
-                console.log(`🔄 [auth] Redirecting ${this.userRole} to: ${finalUrl.toString()}`);
+        console.log(`🔄 [auth] Redirecting ${this.userRole} to: ${finalUrl.toString()}`);
 
-                // Redirect
-                window.location.href = finalUrl.toString();
+        // Redirect
+        window.location.href = finalUrl.toString();
 
-            } catch (error) {
-                console.error('❌ Failed to prepare cross-domain redirect:', error);
-                // Fallback to cookie-based method
-                const fallbackResult = getAuthIntentCookie();
-                let fallbackUrl = `https://${this.userRole === 'admin' ? 'cp.fansmeed.com' : 'fansmeed.com'}/`;
+    } catch (error) {
+        console.error('❌ Failed to prepare cross-domain redirect:', error);
+        // Fallback to simple redirect
+        const fallbackResult = getAuthIntentCookie();
+        let fallbackUrl = `https://${this.userRole === 'admin' ? 'cp.fansmeed.com' : 'fansmeed.com'}/`;
 
-                if (fallbackResult.valid) {
-                    fallbackUrl = fallbackResult.data.redirectUrl;
-                }
+        if (fallbackResult.valid) {
+            fallbackUrl = fallbackResult.data.redirectUrl;
+        }
 
-                clearAuthIntentCookie();
-                window.location.href = fallbackUrl;
-            }
-        },
+        clearAuthIntentCookie();
+        window.location.href = fallbackUrl;
+    }
+},
 
         /**
          * Cleanup
