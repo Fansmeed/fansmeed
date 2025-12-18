@@ -7,5 +7,5 @@ setGlobalOptions({
 });
 
 // Cross-domain authentication functions
-const verifySession = require('./verifySession');
-exports.verifySession = verifySession.verifySessionCallable;
+// const verifySession = require('./verifySession');
+// exports.verifySession = verifySession.verifySessionCallable;

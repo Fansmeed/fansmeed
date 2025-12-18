@@ -31,7 +31,7 @@ import {
     deleteDoc
 } from "firebase/firestore";
 import { collectDeviceInfo } from '@/utils/deviceInfo';
-import { getAuthIntentCookie, clearAuthIntentCookie, getTargetDomain } from '@/utils/cookieChecker';
+import { getAuthIntentCookie, clearAuthIntentCookie, getTargetDomain } from '@/utils/cookieChecker'
 
 // Authentication operations
 export const AUTH_OPERATIONS = {
@@ -651,9 +651,9 @@ export const useAuthStore = defineStore('auth', {
                         console.log(`🔐 ${userRole.toUpperCase()} sign-in completed successfully`);
 
                         // Redirect based on role
-                        // setTimeout(() => {
-                        //     this.redirectToTargetApp();
-                        // }, 1500);
+                        setTimeout(() => {
+                            this.redirectToTargetApp();
+                        }, 1500);
 
                         return result.user;
 
@@ -924,55 +924,56 @@ export const useAuthStore = defineStore('auth', {
         /**
          * Redirect to target application based on user role
          */
-        // redirectToTargetApp() {
-        //     if (!this.userRole) {
-        //         console.error('Cannot redirect: No user role determined')
-        //         return
-        //     }
+        // Make sure these imports are at the top
 
-        //     // Get redirect URL from cookie or session
-        //     const cookieResult = getAuthIntentCookie()
-        //     let redirectUrl = '/'
+// Then update the redirectToTargetApp method:
+async redirectToTargetApp() {
+    if (!this.userRole) {
+        console.error('Cannot redirect: No user role determined');
+        return;
+    }
 
-        //     if (cookieResult.valid && cookieResult.data.redirectUrl) {
-        //         redirectUrl = cookieResult.data.redirectUrl
-        //     } else if (sessionStorage.getItem('authRedirectUrl')) {
-        //         redirectUrl = sessionStorage.getItem('authRedirectUrl')
-        //     }
+    // Get redirect URL from cookie
+    const cookieResult = getAuthIntentCookie();
+    
+    let redirectUrl = '/';
+    if (cookieResult.valid && cookieResult.data.redirectUrl) {
+        redirectUrl = cookieResult.data.redirectUrl;
+    }
 
-        //     const targetDomain = getTargetDomain(this.userRole)
+    // Build target URL
+    const targetDomain = getTargetDomain(this.userRole);
+    
+    // Ensure redirect URL is for the correct domain
+    try {
+        const url = new URL(redirectUrl);
+        if (!url.hostname.includes(targetDomain)) {
+            // If redirect URL is for wrong domain, use target domain home
+            redirectUrl = `https://${targetDomain}/`;
+        }
+    } catch (error) {
+        // Invalid URL, use target domain home
+        redirectUrl = `https://${targetDomain}/`;
+    }
 
-        //     // Build final URL - ensure it's for the correct domain
-        //     let finalUrl
-        //     try {
-        //         const url = new URL(redirectUrl)
-        //         // If redirect URL is already for the target domain, use it as-is
-        //         if (url.hostname.includes(targetDomain)) {
-        //             finalUrl = redirectUrl
-        //         } else {
-        //             // Otherwise, redirect to target domain home
-        //             finalUrl = `https://${targetDomain}/`
-        //         }
-        //     } catch (error) {
-        //         // If redirectUrl is not a valid URL, use target domain home
-        //         finalUrl = `https://${targetDomain}/`
-        //     }
+    console.log(`🔄 Redirecting ${this.userRole} to: ${redirectUrl}`);
 
-        //     console.log(`🔄 [auth] Redirecting ${this.userRole} to: ${finalUrl}`)
+    // IMPORTANT: Add Firebase user info to URL for the target site
+    if (this.currentUser) {
+        const url = new URL(redirectUrl);
+        url.searchParams.set('authUserId', this.currentUser.uid);
+        url.searchParams.set('authEmail', this.currentUser.email);
+        url.searchParams.set('authToken', await this.currentUser.getIdToken());
+        url.searchParams.set('source', 'auth.fansmeed.com');
+        redirectUrl = url.toString();
+    }
 
-        //     // Clear cookie after use
-        //     clearAuthIntentCookie()
-        //     sessionStorage.removeItem('authRedirectUrl')
+    // Clear cookie after use
+    clearAuthIntentCookie();
 
-        //     // Redirect
-        //     window.location.href = finalUrl
-        // },
-
-        redirectToTargetApp() {
-    // ⚠️ DISABLE THIS METHOD - we handle redirect in CompleteSignIn.vue
-    console.log('⚠️ redirectToTargetApp called but disabled - using session-based redirect');
-    return;
-        },
+    // Redirect immediately
+    window.location.href = redirectUrl;
+},
 
         /**
          * Cleanup

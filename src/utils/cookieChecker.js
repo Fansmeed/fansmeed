@@ -1,22 +1,11 @@
 /**
- * Cookie utility for cross-domain authentication flow
- * Handles cookie creation, validation, and cleanup
+ * Cookie utility for reading auth intent cookies
+ * With Caesar cipher decryption for security
  */
 
-// Cookie configuration - FIXED FOR CROSS-DOMAIN
-const COOKIE_CONFIG = {
+export const COOKIE_CONFIG = {
     NAME: 'authIntent',
-    MAX_AGE: 1200, // 20 minutes in seconds (20 * 60)
-    PATH: '/',
-    SECURE: true,
-    SAMESITE: 'none', // Changed to 'none' for cross-domain
-    DOMAIN: '.fansmeed.com' // Added domain for cross-subdomain sharing
-};
-
-// Valid user roles
-const USER_ROLES = {
-    USER: 'user',
-    ADMIN: 'admin'
+    MAX_AGE: 1200 // 20 minutes in seconds
 };
 
 // Special words for encryption validation (Caesar cipher shift-14)
@@ -24,22 +13,6 @@ const VALIDATION_WORDS = [
     'authenticate', 'authorize', 'validate', 'verify', 
     'access', 'secure', 'login', 'session', 'token'
 ];
-
-/**
- * Caesar cipher encryption (shift 14)
- */
-function caesarEncrypt(text) {
-    return text.split('').map(char => {
-        const code = char.charCodeAt(0);
-        if (code >= 65 && code <= 90) { // Uppercase
-            return String.fromCharCode(((code - 65 + 14) % 26) + 65);
-        }
-        if (code >= 97 && code <= 122) { // Lowercase
-            return String.fromCharCode(((code - 97 + 14) % 26) + 97);
-        }
-        return char;
-    }).join('');
-}
 
 /**
  * Caesar cipher decryption (shift 14)
@@ -55,16 +28,6 @@ function caesarDecrypt(text) {
         }
         return char;
     }).join('');
-}
-
-/**
- * Generate encrypted validation token
- */
-function generateValidationToken() {
-    const randomWord = VALIDATION_WORDS[Math.floor(Math.random() * VALIDATION_WORDS.length)];
-    const encrypted = caesarEncrypt(randomWord);
-    const timestamp = Date.now().toString(36);
-    return `${encrypted}_${timestamp}`;
 }
 
 /**
@@ -95,47 +58,7 @@ function validateToken(token) {
 }
 
 /**
- * Create auth intent cookie - FIXED VERSION
- */
-export function setAuthIntentCookie(userRole, redirectUrl) {
-    try {
-        console.log('🍪 [auth] Setting auth cookie for role:', userRole);
-        console.log('🍪 [auth] Redirect URL:', redirectUrl);
-        
-        const authData = {
-            userRole,
-            redirectUrl: redirectUrl || window.location.origin,
-            loginTimeRequest: Date.now(),
-            validationToken: generateValidationToken(),
-            source: 'auth.fansmeed.com',
-            timestamp: Date.now()
-        };
-
-        const encodedData = btoa(JSON.stringify(authData));
-        
-        // CRITICAL: Must include domain for cross-subdomain access
-        const cookieString = `${COOKIE_CONFIG.NAME}=${encodedData}; ` +
-                           `domain=${COOKIE_CONFIG.DOMAIN}; ` +
-                           `path=${COOKIE_CONFIG.PATH}; ` +
-                           `max-age=${COOKIE_CONFIG.MAX_AGE}; ` +
-                           `secure; ` +
-                           `samesite=${COOKIE_CONFIG.SAMESITE}`;
-        
-        console.log('🍪 [auth] Setting cookie:', cookieString);
-        document.cookie = cookieString;
-        
-        // Debug: Verify cookie was set
-        console.log('🍪 [auth] Current cookies after set:', document.cookie);
-        
-        return true;
-    } catch (error) {
-        console.error('Failed to set auth intent cookie:', error);
-        return false;
-    }
-}
-
-/**
- * Read and validate auth intent cookie - FIXED VERSION
+ * Read and validate auth intent cookie
  */
 export function getAuthIntentCookie() {
     try {
@@ -143,13 +66,9 @@ export function getAuthIntentCookie() {
         console.log('🍪 [auth] All cookies:', document.cookie);
         
         const cookies = document.cookie.split(';');
-        console.log('🍪 [auth] Split cookies:', cookies);
-        
         const authCookie = cookies.find(cookie => 
             cookie.trim().startsWith(`${COOKIE_CONFIG.NAME}=`)
         );
-
-        console.log('🍪 [auth] Found auth cookie:', authCookie);
 
         if (!authCookie) {
             console.log('🍪 [auth] No auth intent cookie found');
@@ -160,15 +79,10 @@ export function getAuthIntentCookie() {
         }
 
         const encodedData = authCookie.split('=')[1];
-        console.log('🍪 [auth] Encoded data:', encodedData);
         
         try {
-            // Decode with padding fix
-            const decodedData = atob(encodedData.replace(/\s/g, ''));
-            console.log('🍪 [auth] Decoded data:', decodedData);
-            
+            const decodedData = atob(encodedData);
             const authData = JSON.parse(decodedData);
-            console.log('🍪 [auth] Parsed auth data:', authData);
             
             // Validate required fields
             if (!authData.userRole || !authData.loginTimeRequest || !authData.validationToken) {
@@ -180,7 +94,7 @@ export function getAuthIntentCookie() {
             }
             
             // Validate user role
-            if (![USER_ROLES.USER, USER_ROLES.ADMIN].includes(authData.userRole)) {
+            if (!['user', 'admin'].includes(authData.userRole)) {
                 console.log('🍪 [auth] Invalid user role:', authData.userRole);
                 return {
                     valid: false,
@@ -197,7 +111,6 @@ export function getAuthIntentCookie() {
             
             if (cookieAge > maxAgeMs) {
                 console.log('🍪 [auth] Cookie expired');
-                // Clean up expired cookie
                 clearAuthIntentCookie();
                 return {
                     valid: false,
@@ -246,37 +159,23 @@ export function getAuthIntentCookie() {
 }
 
 /**
- * Clear auth intent cookie - FIXED VERSION
+ * Clear auth intent cookie
  */
 export function clearAuthIntentCookie() {
     document.cookie = `${COOKIE_CONFIG.NAME}=; ` +
-                     `domain=${COOKIE_CONFIG.DOMAIN}; ` +
-                     `path=${COOKIE_CONFIG.PATH}; ` +
+                     `domain=.fansmeed.com; ` +
+                     `path=/; ` +
                      `max-age=0; ` +
-                     `expires=Thu, 01 Jan 1970 00:00:00 GMT; ` +
-                     `samesite=${COOKIE_CONFIG.SAMESITE}`;
+                     `expires=Thu, 01 Jan 1970 00:00:00 GMT;`;
     
     console.log('🍪 [auth] Auth cookie cleared');
-}
-
-/**
- * Check if we're on the auth domain
- */
-export function isAuthDomain() {
-    return window.location.hostname === 'auth.fansmeed.com';
 }
 
 /**
  * Get target domain based on user role
  */
 export function getTargetDomain(userRole) {
-    switch (userRole) {
-        case USER_ROLES.ADMIN:
-            return 'cp.fansmeed.com';
-        case USER_ROLES.USER:
-        default:
-            return 'fansmeed.com';
-    }
+    return userRole === 'admin' ? 'cp.fansmeed.com' : 'fansmeed.com';
 }
 
 /**
