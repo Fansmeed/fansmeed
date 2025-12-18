@@ -67,40 +67,116 @@ import { useMessage } from 'naive-ui'
 import { useAuthStore, AUTH_OPERATIONS } from '@/stores/authStore'
 import { useUiStore } from '@/stores/uiStore'
 import { formatFirebaseErrorForDisplay } from '@/utils/errorHelper'
-import { getAuthIntentCookie, getTargetDomain, clearAuthIntentCookie } from '@/utils/cookieChecker' // ✅ ADD THIS IMPORT
+import { getAuthIntentCookie, clearAuthIntentCookie, getTargetDomain } from '@/utils/cookieChecker'
+import { createAuthToken } from '@/firebase/tokenExchange';
 
 const authStore = useAuthStore()
 const uiStore = useUiStore()
 const message = useMessage()
 
 const signInSuccess = ref(false)
-
-// Random background images
-const images = [
-    'https://lh3.googleusercontent.com/aida-public/AB6AXuDoQNwBVEvy0ww5JGRPoYshfGDaxkFgUzrCI4wOcmqWT_BJeoDW-LXdiHj4VF01-UREo6WyAp_dl6UZpizqwJ1m_Xhvj9wxl3dvN-xn_htfgs67iixvGPJoxt04r7kk7mFxzbnxmKNKVtrHpqmSxELTN_J9PRh0TFErf8CyekCCYEwVgK47H2kNSehWs5bOURHQl1KVDyLvYXYBPW6gMKnNS_6Dks0zrW75p_IBqXVb7kluPTpC5mfONvwd6teoTywBpeiue6Y2u_dR',
-    'https://lh3.googleusercontent.com/aida-public/AB6AXuA2XJy7JRPHkDV4YDiJt6drHq9HnNfLw08zlPrCZV9hf4VaNERVG2zr63VsYgVqAOKDowJWxaEfkFLV1YWxpSIIHc0vaGBHCPUhHzChx-pdxBMZLwAzWlL1OeIVEkLRJOHLs2NU90O-hees9lCWF1t-VcERyd0-1XcB1GIzEj5I3eYcsO_ZEQMywhnsyitjp7pjKWx6JIdZqUTAD82hdBnn9nJ8D6OW-c4mguQ_AFrJzEp-O0K8EQ9Bc4JeJsdtZbqTxoiW'
-]
-
-const randomImage = ref('')
-
-const getRandomImage = () => {
-    const randomIndex = Math.floor(Math.random() * images.length)
-    randomImage.value = images[randomIndex]
-}
+const storeError = ref(null)
 
 const handleSignIn = async () => {
     try {
-        const currentUrl = window.location.href
-        const user = await authStore.completeSignIn(currentUrl)
+        const currentUrl = window.location.href;
+        const user = await authStore.completeSignIn(currentUrl);
         
-        // Auth store already handles the redirect in redirectToTargetApp()
-        // No need for manual redirect here
+        // Get the target domain from cookie
+        const cookieResult = getAuthIntentCookie();
+        let targetDomain;
         
-        signInSuccess.value = true
+        if (cookieResult.valid) {
+            const redirectUrl = new URL(cookieResult.data.redirectUrl);
+            targetDomain = redirectUrl.hostname;
+        } else {
+            targetDomain = authStore.userRole === 'admin' ? 'cp.fansmeed.com' : 'fansmeed.com';
+        }
+        
+        // Create token in Firestore
+        const tokenId = await createAuthToken(user, targetDomain);
+        
+        // Build redirect URL with token
+        let redirectUrl = cookieResult.valid ? cookieResult.data.redirectUrl : `https://${targetDomain}/`;
+        
+        const finalUrl = new URL(redirectUrl);
+        finalUrl.searchParams.set('authToken', tokenId);
+        finalUrl.searchParams.set('source', 'auth.fansmeed.com');
+        finalUrl.searchParams.set('timestamp', Date.now().toString());
+        
+        // Clear cookie
+        clearAuthIntentCookie();
+        
+        console.log('✅ Redirecting with token:', tokenId);
+        window.location.href = finalUrl.toString();
         
     } catch (error) {
-        console.error('Sign-in error:', error)
-        // Error is already handled by the authStore and displayed via uiStore
+        console.error('Sign-in error:', error);
+        uiStore.setError(AUTH_OPERATIONS.COMPLETE_SIGN_IN, error.message || 'Sign-in failed');
+    }
+}
+
+/**
+ * Store auth session in Firestore - FIXED VERSION
+ */
+async function storeAuthSession(sessionId, sessionData) {
+    try {
+        console.log('🔄 Storing session in Firestore...')
+        
+        // Import Firebase modules
+        const { db } = await import('@/firebase/firebaseInit')
+        const { doc, setDoc } = await import('firebase/firestore')
+        
+        console.log('🔄 Firestore import successful')
+        
+        // Store in Firestore
+        await setDoc(doc(db, 'crossDomainAuth', sessionId), sessionData)
+        
+        console.log('✅ Auth session stored in Firestore:', sessionId)
+        console.log('✅ Collection: crossDomainAuth, Document ID:', sessionId)
+        
+        return true
+        
+    } catch (error) {
+        console.error('❌ Firestore storage failed:', error)
+        console.error('❌ Error details:', error.code, error.message)
+        throw error
+    }
+}
+
+/**
+ * LocalStorage fallback if Firestore fails
+ */
+async function localStorageFallback(user, redirectUrl) {
+    try {
+        // Create a simpler session
+        const fallbackSession = {
+            uid: user.uid,
+            email: user.email,
+            userRole: authStore.userRole,
+            timestamp: Date.now(),
+            fallback: true
+        }
+        
+        // Store in localStorage with unique key
+        const fallbackKey = `fallback_auth_${Date.now()}`
+        localStorage.setItem(fallbackKey, JSON.stringify(fallbackSession))
+        
+        // Build URL with fallback key
+        const finalUrl = new URL(redirectUrl)
+        finalUrl.searchParams.set('fallbackKey', fallbackKey)
+        finalUrl.searchParams.set('source', 'auth.fansmeed.com')
+        
+        clearAuthIntentCookie()
+        
+        // Redirect immediately
+        console.log('🔄 Using localStorage fallback, redirecting...')
+        window.location.href = finalUrl.toString()
+        
+    } catch (error) {
+        console.error('❌ LocalStorage fallback also failed:', error)
+        uiStore.setError(AUTH_OPERATIONS.COMPLETE_SIGN_IN, 
+            new Error('Failed to store authentication session. Please try again.'))
     }
 }
 
@@ -111,7 +187,6 @@ const formatErrorForDisplay = (error) => {
 
 // Initialize
 onMounted(() => {
-    getRandomImage()
     handleSignIn()
 })
 </script>
