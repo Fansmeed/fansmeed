@@ -84,22 +84,26 @@ const handleSignIn = async () => {
         
         // Get the target domain from cookie
         const cookieResult = getAuthIntentCookie();
-        let targetDomain;
+        let targetDomain = 'fansmeed.com'; // Default
+        let redirectPath = '/'; // Default
         
         if (cookieResult.valid) {
-            const redirectUrl = new URL(cookieResult.data.redirectUrl);
-            targetDomain = redirectUrl.hostname;
-        } else {
-            targetDomain = authStore.userRole === 'admin' ? 'cp.fansmeed.com' : 'fansmeed.com';
+            try {
+                const redirectUrl = new URL(cookieResult.data.redirectUrl);
+                targetDomain = redirectUrl.hostname;
+                redirectPath = redirectUrl.pathname + redirectUrl.search;
+            } catch (e) {
+                console.warn('Invalid redirect URL in cookie, using defaults');
+            }
+        } else if (authStore.userRole === 'admin') {
+            targetDomain = 'cp.fansmeed.com';
         }
         
         // Create token in Firestore
         const tokenId = await createAuthToken(user, targetDomain);
         
         // Build redirect URL with token
-        let redirectUrl = cookieResult.valid ? cookieResult.data.redirectUrl : `https://${targetDomain}/`;
-        
-        const finalUrl = new URL(redirectUrl);
+        const finalUrl = new URL(`https://${targetDomain}${redirectPath}`);
         finalUrl.searchParams.set('authToken', tokenId);
         finalUrl.searchParams.set('source', 'auth.fansmeed.com');
         finalUrl.searchParams.set('timestamp', Date.now().toString());
@@ -108,6 +112,9 @@ const handleSignIn = async () => {
         clearAuthIntentCookie();
         
         console.log('✅ Redirecting with token:', tokenId);
+        console.log('✅ Target URL:', finalUrl.toString());
+        
+        // Redirect immediately
         window.location.href = finalUrl.toString();
         
     } catch (error) {
