@@ -18,24 +18,30 @@ const verifySessionCallable = onCall(async (request) => {
         
         const sessionData = sessionDoc.data();
         
-        // Check expiration
+        // Check expiration (using timestamp)
         if (sessionData.expiresAt && Date.now() > sessionData.expiresAt) {
             // Delete expired session
             await db.collection('auth_sessions').doc(sessionId).delete();
             throw new HttpsError('deadline-exceeded', 'Session expired');
         }
         
+        // Check status
+        if (sessionData.status !== 'pending') {
+            throw new HttpsError('failed-precondition', 'Session already used');
+        }
+        
         // Generate custom token for the user
         const customToken = await admin.auth().createCustomToken(sessionData.userId);
         
-        // Delete session after use (one-time use)
+        // Mark session as used immediately
         await db.collection('auth_sessions').doc(sessionId).delete();
         
         return {
             success: true,
             customToken: customToken,
             userId: sessionData.userId,
-            targetDomain: sessionData.targetDomain
+            email: sessionData.email,
+            userRole: sessionData.userRole
         };
         
     } catch (error) {
