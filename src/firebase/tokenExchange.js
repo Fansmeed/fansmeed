@@ -1,7 +1,7 @@
 import { db } from './firebaseInit';
 import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
 
-const SESSION_COLLECTION = 'auth_sessions'; // Fixed collection name
+const SESSION_COLLECTION = 'auth_sessions'; // Must match Cloud Function
 const SESSION_EXPIRY = 60; // 60 seconds
 
 /**
@@ -16,14 +16,15 @@ export async function createAuthSession(user, targetDomain) {
             email: user.email,
             userRole: targetDomain.includes('cp.') ? 'admin' : 'user',
             targetDomain: targetDomain,
-            expiresAt: Date.now() + (SESSION_EXPIRY * 1000), // Using timestamp
+            expiresAt: Date.now() + (SESSION_EXPIRY * 1000),
             createdAt: serverTimestamp(),
             status: 'pending'
         };
 
         await setDoc(doc(db, SESSION_COLLECTION, sessionId), sessionData);
         
-        console.log('✅ Auth session created:', sessionId);
+        console.log('✅ Auth session created in collection:', SESSION_COLLECTION);
+        console.log('✅ Session data:', sessionData);
         return sessionId;
     } catch (error) {
         console.error('Error creating auth session:', error);

@@ -76,7 +76,17 @@ const signInSuccess = ref(false)
 const handleSignIn = async () => {
     try {
         const currentUrl = window.location.href;
+        
+        // Temporarily disable the auth store's redirect
+        const originalRedirect = authStore.redirectToTargetApp;
+        authStore.redirectToTargetApp = () => {
+            console.log('⚠️ Auth store redirect disabled');
+        };
+        
         const user = await authStore.completeSignIn(currentUrl);
+        
+        // Restore original method
+        authStore.redirectToTargetApp = originalRedirect;
         
         if (!user || !user.uid) {
             throw new Error('No user data received');
@@ -91,38 +101,22 @@ const handleSignIn = async () => {
         }
         
         // Create session in Firestore
-        const sessionId = await createAuthSession(user.uid, targetDomain);
+        const sessionId = await createAuthSession(user, targetDomain);
         
-        // Build redirect URL
-        let redirectUrl = `https://${targetDomain}/`;
-        
-        if (cookieResult.valid && cookieResult.data.redirectUrl) {
-            try {
-                const url = new URL(cookieResult.data.redirectUrl);
-                if (url.hostname.includes(targetDomain)) {
-                    redirectUrl = cookieResult.data.redirectUrl;
-                }
-            } catch (e) {
-                console.warn('Invalid redirect URL:', e);
-            }
-        }
-        
-        // Add session ID to redirect URL
-        const finalUrl = new URL(redirectUrl);
-        finalUrl.searchParams.set('sessionId', sessionId);
-        finalUrl.searchParams.set('source', 'auth.fansmeed.com');
+        // Build redirect URL WITH SESSION PARAMETERS
+        const finalUrl = `https://${targetDomain}/?sessionId=${sessionId}&source=auth.fansmeed.com`;
         
         // Clear cookie
         clearAuthIntentCookie();
         
-        console.log('✅ Redirecting to:', finalUrl.toString());
+        console.log('✅ Redirecting to:', finalUrl);
+        console.log('✅ Session ID:', sessionId);
         
-        // Set success state and redirect after brief delay
+        // Set success state and redirect immediately
         signInSuccess.value = true;
         
-        setTimeout(() => {
-            window.location.href = finalUrl.toString();
-        }, 1500);
+        // Redirect immediately (no delay)
+        window.location.href = finalUrl;
         
     } catch (error) {
         console.error('Sign-in error:', error);

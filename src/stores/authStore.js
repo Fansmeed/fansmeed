@@ -651,9 +651,9 @@ export const useAuthStore = defineStore('auth', {
                         console.log(`🔐 ${userRole.toUpperCase()} sign-in completed successfully`);
 
                         // Redirect based on role
-                        setTimeout(() => {
-                            this.redirectToTargetApp();
-                        }, 1500);
+                        // setTimeout(() => {
+                        //     this.redirectToTargetApp();
+                        // }, 1500);
 
                         return result.user;
 
@@ -924,48 +924,54 @@ export const useAuthStore = defineStore('auth', {
         /**
          * Redirect to target application based on user role
          */
+        // redirectToTargetApp() {
+        //     if (!this.userRole) {
+        //         console.error('Cannot redirect: No user role determined')
+        //         return
+        //     }
+
+        //     // Get redirect URL from cookie or session
+        //     const cookieResult = getAuthIntentCookie()
+        //     let redirectUrl = '/'
+
+        //     if (cookieResult.valid && cookieResult.data.redirectUrl) {
+        //         redirectUrl = cookieResult.data.redirectUrl
+        //     } else if (sessionStorage.getItem('authRedirectUrl')) {
+        //         redirectUrl = sessionStorage.getItem('authRedirectUrl')
+        //     }
+
+        //     const targetDomain = getTargetDomain(this.userRole)
+
+        //     // Build final URL - ensure it's for the correct domain
+        //     let finalUrl
+        //     try {
+        //         const url = new URL(redirectUrl)
+        //         // If redirect URL is already for the target domain, use it as-is
+        //         if (url.hostname.includes(targetDomain)) {
+        //             finalUrl = redirectUrl
+        //         } else {
+        //             // Otherwise, redirect to target domain home
+        //             finalUrl = `https://${targetDomain}/`
+        //         }
+        //     } catch (error) {
+        //         // If redirectUrl is not a valid URL, use target domain home
+        //         finalUrl = `https://${targetDomain}/`
+        //     }
+
+        //     console.log(`🔄 [auth] Redirecting ${this.userRole} to: ${finalUrl}`)
+
+        //     // Clear cookie after use
+        //     clearAuthIntentCookie()
+        //     sessionStorage.removeItem('authRedirectUrl')
+
+        //     // Redirect
+        //     window.location.href = finalUrl
+        // },
+
         redirectToTargetApp() {
-            if (!this.userRole) {
-                console.error('Cannot redirect: No user role determined')
-                return
-            }
-
-            // Get redirect URL from cookie or session
-            const cookieResult = getAuthIntentCookie()
-            let redirectUrl = '/'
-
-            if (cookieResult.valid && cookieResult.data.redirectUrl) {
-                redirectUrl = cookieResult.data.redirectUrl
-            } else if (sessionStorage.getItem('authRedirectUrl')) {
-                redirectUrl = sessionStorage.getItem('authRedirectUrl')
-            }
-
-            const targetDomain = getTargetDomain(this.userRole)
-
-            // Build final URL - ensure it's for the correct domain
-            let finalUrl
-            try {
-                const url = new URL(redirectUrl)
-                // If redirect URL is already for the target domain, use it as-is
-                if (url.hostname.includes(targetDomain)) {
-                    finalUrl = redirectUrl
-                } else {
-                    // Otherwise, redirect to target domain home
-                    finalUrl = `https://${targetDomain}/`
-                }
-            } catch (error) {
-                // If redirectUrl is not a valid URL, use target domain home
-                finalUrl = `https://${targetDomain}/`
-            }
-
-            console.log(`🔄 [auth] Redirecting ${this.userRole} to: ${finalUrl}`)
-
-            // Clear cookie after use
-            clearAuthIntentCookie()
-            sessionStorage.removeItem('authRedirectUrl')
-
-            // Redirect
-            window.location.href = finalUrl
+    // ⚠️ DISABLE THIS METHOD - we handle redirect in CompleteSignIn.vue
+    console.log('⚠️ redirectToTargetApp called but disabled - using session-based redirect');
+    return;
         },
 
         /**
