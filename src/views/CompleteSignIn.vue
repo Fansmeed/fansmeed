@@ -67,6 +67,7 @@ import { useMessage } from 'naive-ui'
 import { useAuthStore, AUTH_OPERATIONS } from '@/stores/authStore'
 import { useUiStore } from '@/stores/uiStore'
 import { formatFirebaseErrorForDisplay } from '@/utils/errorHelper'
+import { getAuthIntentCookie, getTargetDomain, clearAuthIntentCookie } from '@/utils/cookieChecker' // ✅ ADD THIS IMPORT
 
 const authStore = useAuthStore()
 const uiStore = useUiStore()
@@ -77,7 +78,7 @@ const signInSuccess = ref(false)
 // Random background images
 const images = [
     'https://lh3.googleusercontent.com/aida-public/AB6AXuDoQNwBVEvy0ww5JGRPoYshfGDaxkFgUzrCI4wOcmqWT_BJeoDW-LXdiHj4VF01-UREo6WyAp_dl6UZpizqwJ1m_Xhvj9wxl3dvN-xn_htfgs67iixvGPJoxt04r7kk7mFxzbnxmKNKVtrHpqmSxELTN_J9PRh0TFErf8CyekCCYEwVgK47H2kNSehWs5bOURHQl1KVDyLvYXYBPW6gMKnNS_6Dks0zrW75p_IBqXVb7kluPTpC5mfONvwd6teoTywBpeiue6Y2u_dR',
-    'https://lh3.googleusercontent.com/aida-public/AB6AXuA2XJy7JRPHkDV4YDiJt6drHq9HnNfLw08zlPrCZV9hf4VaNERVG2zr63VsYgVqAOKDowJWxaEfkFLV1YWxpSIIHc0vaGBHCPUhHzChx-pdxBMZLwAzWlL1OeIVEkLRJOHLs2NU90O-hees9lCWF1t-VcERyd0-1XcB1GIzEj5I3eYcsUwCEpRuSO_ZEQMywhnsyitjp7pjKWx6JIdZqUTAD82hdBnn9nJ8D6OW-c4mguQ_AFrJzEp-O0K8EQ9Bc4JeJsdtZbqTxoiW'
+    'https://lh3.googleusercontent.com/aida-public/AB6AXuA2XJy7JRPHkDV4YDiJt6drHq9HnNfLw08zlPrCZV9hf4VaNERVG2zr63VsYgVqAOKDowJWxaEfkFLV1YWxpSIIHc0vaGBHCPUhHzChx-pdxBMZLwAzWlL1OeIVEkLRJOHLs2NU90O-hees9lCWF1t-VcERyd0-1XcB1GIzEj5I3eYcsO_ZEQMywhnsyitjp7pjKWx6JIdZqUTAD82hdBnn9nJ8D6OW-c4mguQ_AFrJzEp-O0K8EQ9Bc4JeJsdtZbqTxoiW'
 ]
 
 const randomImage = ref('')
@@ -87,33 +88,19 @@ const getRandomImage = () => {
     randomImage.value = images[randomIndex]
 }
 
-// In CompleteSignIn.vue or authStore.js redirectToTargetApp() method
 const handleSignIn = async () => {
     try {
         const currentUrl = window.location.href
         const user = await authStore.completeSignIn(currentUrl)
         
-        // ✅ CRITICAL: Get ID token before redirect
-        const idToken = await user.getIdToken()
+        // Auth store already handles the redirect in redirectToTargetApp()
+        // No need for manual redirect here
         
-        // Build redirect URL with token
-        const cookieResult = getAuthIntentCookie()
-        let redirectUrl = cookieResult.valid ? cookieResult.data.redirectUrl : `https://${getTargetDomain(authStore.userRole)}/`
-        
-        // Add token to URL
-        const finalUrl = new URL(redirectUrl)
-        finalUrl.searchParams.set('authToken', idToken)
-        finalUrl.searchParams.set('uid', user.uid)
-        finalUrl.searchParams.set('source', 'auth.fansmeed.com')
-        
-        // Clear cookie
-        clearAuthIntentCookie()
-        
-        // Redirect with token
-        window.location.href = finalUrl.toString()
+        signInSuccess.value = true
         
     } catch (error) {
         console.error('Sign-in error:', error)
+        // Error is already handled by the authStore and displayed via uiStore
     }
 }
 
