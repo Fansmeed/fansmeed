@@ -1,3 +1,4 @@
+<!-- Location: auth.fansmeed.com/src/views/CompleteSignIn.vue -->
 <template>
     <div class="min-h-screen flex flex-col lg:flex-row">
         <!-- Left side background (keep your existing layout) -->
@@ -24,7 +25,7 @@
                     <ProgressSpinner style="width: 50px; height: 50px" strokeWidth="8" fill="transparent"
                         animationDuration=".5s" />
                     <p class="text-neutral-500 dark:text-neutral-400 mt-4">
-                        Verifying your sign-in link...
+                        Completing sign-in...
                     </p>
                 </div>
 
@@ -56,6 +57,11 @@
                     <p class="text-neutral-500 dark:text-neutral-400">
                         Redirecting you to the application...
                     </p>
+                    <div v-if="redirectInfo" class="mt-4 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
+                        <p class="text-sm text-blue-600 dark:text-blue-400">
+                            Redirecting to: {{ redirectInfo.domain }}
+                        </p>
+                    </div>
                 </div>
             </div>
         </div>
@@ -66,17 +72,29 @@
 import { ref, onMounted } from 'vue'
 import { useAuthStore, AUTH_OPERATIONS } from '@/stores/authStore'
 import { useUiStore } from '@/stores/uiStore'
-import { getAuthIntentCookie, clearAuthIntentCookie } from '@/utils/cookieChecker'
+import { buildRedirectUrl, getRedirectUrlFromParams } from '@/utils/subdomainDetector'
+import ProgressSpinner from 'primevue/progressspinner'
+import Button from 'primevue/button'
 
 const authStore = useAuthStore()
 const uiStore = useUiStore()
 const signInSuccess = ref(false)
+const redirectInfo = ref(null)
 
-// Cloud Function URL - UPDATE WITH YOUR ACTUAL PROJECT ID
+// Cloud Function URL
 const CLOUD_FUNCTION_URL = 'https://us-central1-fansmeed-quiz-app.cloudfunctions.net/setSessionCookie'
+
+// Format error for display (keep your existing error formatter)
+const formatErrorForDisplay = (error) => {
+    if (typeof error === 'string') return error
+    if (error?.message) return error.message
+    return 'An unknown error occurred'
+}
 
 const handleSignIn = async () => {
     try {
+        console.log('🔐 Starting sign-in process...')
+        
         const currentUrl = window.location.href
         const user = await authStore.completeSignIn(currentUrl)
 
@@ -86,32 +104,35 @@ const handleSignIn = async () => {
 
         // Get fresh ID token
         const idToken = await user.getIdToken(true)
+        console.log('✅ ID token obtained')
 
-        // Get redirect URL from cookie (set by cp.fansmeed.com)
-        const cookieResult = getAuthIntentCookie()
-        let redirectUrl = '/'
-
-        if (cookieResult.valid && cookieResult.data.redirectUrl) {
-            redirectUrl = cookieResult.data.redirectUrl
-        } else {
-            // Fallback: determine based on user role
-            console.log('⚠️ No redirect URL in cookie, determining from user role')
-            // You might need to fetch user role here or in the authStore.completeSignIn
-            redirectUrl = 'https://cp.fansmeed.com/' // Default to admin for now
+        // Determine user role from authStore
+        const userRole = authStore.userRole || 'user'
+        console.log(`👤 User role: ${userRole}`)
+        
+        // Get redirect URL from params or use default
+        const redirectParam = getRedirectUrlFromParams()
+        console.log('🔗 Redirect param:', redirectParam)
+        
+        // Build secure redirect URL
+        const redirectUrl = buildRedirectUrl(userRole, redirectParam)
+        
+        // Store redirect info for display
+        redirectInfo.value = {
+            domain: new URL(redirectUrl).hostname,
+            url: redirectUrl
         }
-
-        // Clear the client-side cookie
-        clearAuthIntentCookie()
 
         // Build Cloud Function URL
         const functionUrl = new URL(CLOUD_FUNCTION_URL)
         functionUrl.searchParams.set('token', idToken)
         functionUrl.searchParams.set('redirectUrl', redirectUrl)
 
-        console.log('✅ Sign-in successful, redirecting to Cloud Function')
-        console.log('🔗 Function URL:', functionUrl.toString())
+        console.log('✅ Sign-in successful')
+        console.log('👤 User role:', userRole)
+        console.log('🔗 Redirect to:', redirectUrl)
+        console.log('⚡ Cloud Function URL:', functionUrl.toString())
 
-        // Show success state
         signInSuccess.value = true
 
         // Redirect to Cloud Function after brief delay

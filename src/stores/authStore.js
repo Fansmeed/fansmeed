@@ -1,3 +1,6 @@
+// Location: auth.fansmeed.com/src/stores/authStore.js
+// This stays mostly the same as your original, but remove cookie-related code
+
 import { defineStore } from 'pinia';
 import { useUiStore } from './uiStore';
 import {
@@ -31,7 +34,6 @@ import {
     deleteDoc
 } from "firebase/firestore";
 import { collectDeviceInfo } from '@/utils/deviceInfo';
-import { getAuthIntentCookie, clearAuthIntentCookie, getTargetDomain } from '@/utils/cookieChecker'
 
 // Authentication operations
 export const AUTH_OPERATIONS = {
@@ -179,24 +181,12 @@ async function updateLoginHistory(uid, userData, deviceInfo) {
     }
 }
 
-/**
- * Get redirect URL from cookie or default
- */
-function getRedirectUrl() {
-    const cookieResult = getAuthIntentCookie();
-    if (cookieResult.valid) {
-        return cookieResult.data.redirectUrl;
-    }
-    return '/';
-}
-
 export const useAuthStore = defineStore('auth', {
     state: () => ({
         currentUser: null,
         userProfile: null,
         authChecked: false,
-        userRole: null,
-        unsubscribeAuthListener: null
+        userRole: null
     }),
 
     getters: {
@@ -209,7 +199,7 @@ export const useAuthStore = defineStore('auth', {
 
     actions: {
         /**
-         * Initialize authentication - check cookies and setup listener
+         * Initialize authentication - setup Firebase listener only
          */
         async initialize() {
             const uiStore = useUiStore();
@@ -218,21 +208,12 @@ export const useAuthStore = defineStore('auth', {
                 uiStore.setLoading('AUTH_INIT', true);
 
                 const unsubscribe = onAuthStateChanged(auth, async (user) => {
-                    console.log('🔐 Auth state changed:', user ? 'User found' : 'No user');
+                    console.log('🔐 [Auth Site] Auth state changed:', user ? 'User found' : 'No user');
 
                     if (user) {
                         this.currentUser = user;
 
-                        // Check if email is verified for regular users
-                        const cookieResult = getAuthIntentCookie();
-                        if (cookieResult.valid && cookieResult.data.userRole === USER_ROLES.USER) {
-                            if (!user.emailVerified) {
-                                console.log('⚠️ User email not verified');
-                                // We'll handle this in the login flow
-                            }
-                        }
-
-                        // Determine user role from cookie or fetch profile
+                        // Determine user role by checking database
                         await this.determineUserRole(user);
 
                     } else {
@@ -250,38 +231,31 @@ export const useAuthStore = defineStore('auth', {
         },
 
         /**
-         * Determine user role based on cookie or fetch from DB
+         * Determine user role from database
          */
         async determineUserRole(user) {
-            const cookieResult = getAuthIntentCookie();
-
-            if (cookieResult.valid) {
-                this.userRole = cookieResult.data.userRole;
-                console.log(`🔐 User role determined from cookie: ${this.userRole}`);
-            } else {
-                // Try to determine role from database
-                try {
-                    // Check if user is admin
-                    const employeeDoc = await findUserByEmail(user.email, COLLECTIONS.EMPLOYEES);
-                    if (employeeDoc) {
-                        this.userRole = USER_ROLES.ADMIN;
-                        this.userProfile = employeeDoc.data();
+            // Try to determine role from database
+            try {
+                // Check if user is admin
+                const employeeDoc = await findUserByEmail(user.email, COLLECTIONS.EMPLOYEES);
+                if (employeeDoc) {
+                    this.userRole = USER_ROLES.ADMIN;
+                    this.userProfile = employeeDoc.data();
+                } else {
+                    // Check if user is regular user
+                    const userDoc = await findUserByEmail(user.email, COLLECTIONS.USERS);
+                    if (userDoc) {
+                        this.userRole = USER_ROLES.USER;
+                        this.userProfile = userDoc.data();
                     } else {
-                        // Check if user is regular user
-                        const userDoc = await findUserByEmail(user.email, COLLECTIONS.USERS);
-                        if (userDoc) {
-                            this.userRole = USER_ROLES.USER;
-                            this.userProfile = userDoc.data();
-                        } else {
-                            console.log('⚠️ User not found in any collection');
-                            this.userRole = null;
-                        }
+                        console.log('⚠️ User not found in any collection');
+                        this.userRole = null;
                     }
-                    console.log(`🔐 User role determined from DB: ${this.userRole}`);
-                } catch (error) {
-                    console.error('Error determining user role:', error);
-                    this.userRole = null;
                 }
+                console.log(`🔐 [Auth Site] User role determined: ${this.userRole}`);
+            } catch (error) {
+                console.error('Error determining user role:', error);
+                this.userRole = null;
             }
         },
 
@@ -307,8 +281,8 @@ export const useAuthStore = defineStore('auth', {
                         const deviceInfo = await collectDeviceInfo();
                         await updateLoginHistory(result.user.uid, { role: USER_ROLES.USER }, deviceInfo);
 
-                        // Fetch user profile
-                        await this.fetchUserProfile(result.user.uid, USER_ROLES.USER);
+                        // Determine user role
+                        await this.determineUserRole(result.user);
 
                         // Return success data
                         return {
@@ -318,11 +292,7 @@ export const useAuthStore = defineStore('auth', {
 
                     } catch (error) {
                         console.error('User login error:', error);
-
-                        // ✅ NO Firebase error mapping needed!
-                        // Error formatter will handle: 'auth/user-not-found', 'auth/wrong-password', etc.
-
-                        throw error; // Just re-throw
+                        throw error;
                     }
                 }
             );
@@ -394,11 +364,7 @@ export const useAuthStore = defineStore('auth', {
 
                     } catch (error) {
                         console.error('User registration error:', error);
-
-                        // ✅ NO Firebase error mapping needed!
-                        // Error formatter will handle: 'auth/email-already-in-use', 'auth/weak-password', etc.
-
-                        throw error; // Just re-throw
+                        throw error;
                     }
                 }
             );
@@ -477,11 +443,7 @@ export const useAuthStore = defineStore('auth', {
 
                     } catch (error) {
                         console.error('Social login error:', error);
-
-                        // ✅ NO Firebase error mapping needed!
-                        // Error formatter already handles: 'auth/popup-closed-by-user', etc.
-
-                        throw error; // Just re-throw
+                        throw error;
                     }
                 }
             );
@@ -650,11 +612,6 @@ export const useAuthStore = defineStore('auth', {
 
                         console.log(`🔐 ${userRole.toUpperCase()} sign-in completed successfully`);
 
-                        // Redirect based on role
-                        setTimeout(() => {
-                            this.redirectToTargetApp();
-                        }, 1500);
-
                         return result.user;
 
                     } catch (firebaseError) {
@@ -733,11 +690,6 @@ export const useAuthStore = defineStore('auth', {
 
                         console.log('✅ Email verification completed successfully');
 
-                        // Redirect to main app
-                        setTimeout(() => {
-                            this.redirectToTargetApp();
-                        }, 1500);
-
                         return result.user;
 
                     } catch (error) {
@@ -747,94 +699,6 @@ export const useAuthStore = defineStore('auth', {
                 }
             );
         },
-
-        /**
-         * Social login
-         */
-        // async socialLogin(providerType) {
-        //     const uiStore = useUiStore();
-        //     const key = AUTH_OPERATIONS.SOCIAL_LOGIN;
-
-        //     return await uiStore.withOperation(
-        //         key,
-        //         async () => {
-        //             try {
-        //                 let provider;
-        //                 if (providerType === 'google') {
-        //                     provider = new GoogleAuthProvider();
-        //                 } else if (providerType === 'facebook') {
-        //                     provider = new FacebookAuthProvider();
-        //                 } else {
-        //                     throw new Error('Unsupported social provider');
-        //                 }
-
-        //                 const result = await signInWithPopup(auth, provider);
-        //                 const userUid = result.user.uid;
-        //                 const email = result.user.email;
-
-        //                 // Check if user exists
-        //                 let userDoc = await findUserByEmail(email, COLLECTIONS.USERS);
-
-        //                 if (!userDoc) {
-        //                     // Create new user document
-        //                     const userData = {
-        //                         id: userUid,
-        //                         uid: userUid,
-        //                         email: email.toLowerCase(),
-        //                         firstName: result.user.displayName?.split(' ')[0] || '',
-        //                         lastName: result.user.displayName?.split(' ').slice(1).join(' ') || '',
-        //                         userName: result.user.displayName?.replace(/\s+/g, '').toLowerCase() || '',
-        //                         profilePicture: result.user.photoURL || '',
-        //                         provider: providerType,
-        //                         role: USER_ROLES.USER,
-        //                         isActive: true,
-        //                         emailVerified: true,
-        //                         createdAt: serverTimestamp(),
-        //                         lastLogin: serverTimestamp()
-        //                     };
-
-        //                     await setDoc(doc(db, COLLECTIONS.USERS, userUid), userData);
-        //                     this.userProfile = userData;
-        //                 } else {
-        //                     // Update existing user
-        //                     const userDocRef = doc(db, COLLECTIONS.USERS, userUid);
-        //                     await updateDoc(userDocRef, {
-        //                         lastLogin: serverTimestamp()
-        //                     });
-
-        //                     this.userProfile = userDoc.data();
-        //                 }
-
-        //                 this.currentUser = result.user;
-        //                 this.userRole = USER_ROLES.USER;
-        //                 this.authChecked = true;
-
-        //                 // Update login history
-        //                 const deviceInfo = await collectDeviceInfo();
-        //                 await updateLoginHistory(userUid, { role: USER_ROLES.USER }, deviceInfo);
-
-        //                 // Return success - NO MESSAGE HERE
-        //                 return {
-        //                     user: result.user,
-        //                     success: true
-        //                 };
-
-        //             } catch (error) {
-        //                 console.error('Social login error:', error);
-
-        //                 if (error.code === 'auth/popup-closed-by-user') {
-        //                     throw new Error('POPUP_CLOSED:Login popup was closed.');
-        //                 } else if (error.code === 'auth/popup-blocked') {
-        //                     throw new Error('POPUP_BLOCKED:Login popup was blocked by browser.');
-        //                 } else if (error.code === 'auth/account-exists-with-different-credential') {
-        //                     throw new Error('ACCOUNT_EXISTS:An account already exists with this email using a different login method.');
-        //                 }
-
-        //                 throw error;
-        //             }
-        //         }
-        //     );
-        // },
 
         /**
          * Fetch user profile
@@ -910,9 +774,6 @@ export const useAuthStore = defineStore('auth', {
                     this.userRole = null;
                     this.authChecked = false;
 
-                    // Clear cookie
-                    clearAuthIntentCookie();
-
                     sessionStorage.clear();
                     localStorage.clear();
 
@@ -922,68 +783,9 @@ export const useAuthStore = defineStore('auth', {
         },
 
         /**
-         * Redirect to target application based on user role
-         */
-        // Make sure these imports are at the top
-
-// Then update the redirectToTargetApp method:
-async redirectToTargetApp() {
-    if (!this.userRole) {
-        console.error('Cannot redirect: No user role determined');
-        return;
-    }
-
-    // Get redirect URL from cookie
-    const cookieResult = getAuthIntentCookie();
-    
-    let redirectUrl = '/';
-    if (cookieResult.valid && cookieResult.data.redirectUrl) {
-        redirectUrl = cookieResult.data.redirectUrl;
-    }
-
-    // Build target URL
-    const targetDomain = getTargetDomain(this.userRole);
-    
-    // Ensure redirect URL is for the correct domain
-    try {
-        const url = new URL(redirectUrl);
-        if (!url.hostname.includes(targetDomain)) {
-            // If redirect URL is for wrong domain, use target domain home
-            redirectUrl = `https://${targetDomain}/`;
-        }
-    } catch (error) {
-        // Invalid URL, use target domain home
-        redirectUrl = `https://${targetDomain}/`;
-    }
-
-    console.log(`🔄 Redirecting ${this.userRole} to: ${redirectUrl}`);
-
-    // IMPORTANT: Add Firebase user info to URL for the target site
-    if (this.currentUser) {
-        const url = new URL(redirectUrl);
-        url.searchParams.set('authUserId', this.currentUser.uid);
-        url.searchParams.set('authEmail', this.currentUser.email);
-        url.searchParams.set('authToken', await this.currentUser.getIdToken());
-        url.searchParams.set('source', 'auth.fansmeed.com');
-        redirectUrl = url.toString();
-    }
-
-    // Clear cookie after use
-    clearAuthIntentCookie();
-
-    // Redirect immediately
-    window.location.href = redirectUrl;
-},
-
-        /**
          * Cleanup
          */
         cleanup() {
-            if (this.unsubscribeAuthListener) {
-                this.unsubscribeAuthListener();
-                this.unsubscribeAuthListener = null;
-            }
-
             this.currentUser = null;
             this.userProfile = null;
             this.authChecked = false;

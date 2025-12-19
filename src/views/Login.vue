@@ -1,3 +1,4 @@
+<!-- Location: auth.fansmeed.com/src/views/Login.vue -->
 <template>
     <div class="min-h-screen flex flex-col lg:flex-row">
         <div
@@ -24,9 +25,9 @@
                 <div class="mb-8">
                     <h1 class="text-3xl font-bold text-neutral-800 dark:text-white mb-2">
                         <span class="text-primary border-l-7 mr-2 rounded-md"></span>
-                        Auth Central
+                        {{ headerTitle }}
                     </h1>
-                    <p class="text-neutral-600 dark:text-neutral-400">Sign in to access your account</p>
+                    <p class="text-neutral-600 dark:text-neutral-400">{{ headerSubtitle }}</p>
                 </div>
 
                 <!-- Loading State -->
@@ -39,33 +40,33 @@
                             </div>
                             <div class="ml-3">
                                 <p class="text-sm text-blue-700 dark:text-blue-400">
-                                    Checking authentication...
+                                    Detecting login type...
                                 </p>
                             </div>
                         </div>
                     </div>
                 </div>
 
-                <!-- Cookie Error Display -->
-                <div v-else-if="cookieError" class="mb-6">
-                    <div class="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4">
+                <!-- Error State -->
+                <div v-else-if="loginType === 'unknown'" class="mb-6">
+                    <div class="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-4">
                         <div class="flex items-start">
                             <div class="flex-shrink-0">
-                                <i class="pi pi-exclamation-triangle text-red-600 dark:text-red-400 text-xl"></i>
+                                <i class="pi pi-exclamation-triangle text-amber-600 dark:text-amber-400 text-xl"></i>
                             </div>
                             <div class="ml-3">
-                                <h3 class="text-sm font-medium text-red-800 dark:text-red-300">
-                                    {{ cookieErrorTitle }}
+                                <h3 class="text-sm font-medium text-amber-800 dark:text-amber-300">
+                                    Invalid Access
                                 </h3>
-                                <div class="mt-2 text-sm text-red-700 dark:text-red-400">
-                                    <p>{{ cookieErrorMessage }}</p>
+                                <div class="mt-2 text-sm text-amber-700 dark:text-amber-400">
+                                    <p>Please access this page through the main application.</p>
                                 </div>
                                 <div class="mt-3">
                                     <div class="-mx-2 -my-1.5 flex space-x-2">
-                                        <Button label="Go to Main Site" severity="warn" @click="goToMainSite"
+                                        <Button label="Go to Admin Site" severity="warn" @click="goToAdminSite"
                                             icon="pi pi-external-link" size="small" />
-                                        <Button label="Retry" severity="help" @click="refreshAndCheck"
-                                            icon="pi pi-refresh" size="small" :loading="checking" />
+                                        <Button label="Go to User Site" severity="help" @click="goToUserSite"
+                                            icon="pi pi-external-link" size="small" />
                                     </div>
                                 </div>
                             </div>
@@ -74,43 +75,9 @@
                 </div>
 
                 <!-- Render appropriate login component -->
-                <div v-else-if="!checking">
-                    <AdminLogin v-if="userRole === 'admin'" />
-                    <UserLogin v-else-if="userRole === 'user'" />
-
-                    <!-- No cookie found - show error message -->
-                    <div v-else class="bg-white dark:bg-neutral-900 rounded-xl shadow-lg p-8 max-w-lg text-center">
-                        <div class="mb-6">
-                            <div class="flex justify-center mb-4">
-                                <div
-                                    class="size-16 bg-amber-100 dark:bg-amber-900/30 rounded-full flex items-center justify-center">
-                                    <i
-                                        class="pi pi-exclamation-triangle text-amber-600 dark:text-amber-400 text-2xl"></i>
-                                </div>
-                            </div>
-                            <h3 class="text-xl font-bold text-neutral-800 dark:text-white mb-2">
-                                Authentication Required
-                            </h3>
-                            <p class="text-neutral-600 dark:text-neutral-400">
-                                Please access this page through the main application.
-                            </p>
-                        </div>
-
-                        <div class="space-y-4">
-                            <div class="flex gap-4 justify-center">
-                                <Button label="Go to Main Site" severity="warn" @click="goToMainSite"
-                                    icon="pi pi-external-link" size="small" />
-                                <Button label="Retry" severity="help" @click="refreshAndCheck" icon="pi pi-refresh"
-                                    size="small" :loading="checking" />
-                            </div>
-                        </div>
-
-                        <div class="mt-6 pt-4 border-t border-neutral-200 dark:border-neutral-700">
-                            <p class="text-sm text-neutral-500 dark:text-neutral-400">
-                                If you believe this is an error, please contact support.
-                            </p>
-                        </div>
-                    </div>
+                <div v-else>
+                    <AdminLogin v-if="loginType === 'admin'" />
+                    <UserLogin v-else-if="loginType === 'user'" />
                 </div>
             </div>
         </div>
@@ -118,13 +85,11 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, computed, onMounted } from 'vue'
 import AdminLogin from '@/components/AdminLogin.vue'
 import UserLogin from '@/components/UserLogin.vue'
-import { getAuthIntentCookie, clearAuthIntentCookie } from '@/utils/cookieChecker'
-
-const router = useRouter()
+import Button from 'primevue/button'
+import { detectLoginType } from '@/utils/subdomainDetector'
 
 // Random background images
 const images = [
@@ -133,11 +98,25 @@ const images = [
 ]
 
 const randomImage = ref('')
-const userRole = ref(null)
-const cookieError = ref(false)
-const cookieErrorTitle = ref('')
-const cookieErrorMessage = ref('')
-const checking = ref(false) // Loading state for retry
+const loginType = ref('')
+const checking = ref(true)
+
+// Computed properties for dynamic headers
+const headerTitle = computed(() => {
+    switch (loginType.value) {
+        case 'admin': return 'Admin Portal';
+        case 'user': return 'FansMeed';
+        default: return 'Authentication';
+    }
+})
+
+const headerSubtitle = computed(() => {
+    switch (loginType.value) {
+        case 'admin': return 'Sign in to access admin dashboard';
+        case 'user': return 'Sign in to your account';
+        default: return 'Authentication portal';
+    }
+})
 
 // Methods
 const getRandomImage = () => {
@@ -145,62 +124,25 @@ const getRandomImage = () => {
     randomImage.value = images[randomIndex]
 }
 
-const checkAuthCookie = () => {
+const detectUserType = () => {
     checking.value = true
-    console.log('🔐 [Login.vue] Checking auth cookie on auth.fansmeed.com')
-    console.log('🔐 [Login.vue] Current hostname:', window.location.hostname)
-
-    const cookieResult = getAuthIntentCookie()
-
-    if (!cookieResult.valid) {
-        cookieError.value = true
-        cookieErrorTitle.value = cookieResult.expired ? 'Login Attempt Expired' : 'Authentication Required'
-        cookieErrorMessage.value = cookieResult.error || 'Please access this page through the main application.'
-
-        if (cookieResult.expired) {
-            clearAuthIntentCookie()
-        }
-    } else {
-        userRole.value = cookieResult.data.userRole
-        console.log(`🔐 [Login.vue] Detected user role: ${userRole.value}`)
-        console.log(`🔐 [Login.vue] Redirect URL: ${cookieResult.data.redirectUrl}`)
-
-        // Store in session for later redirect
-        if (cookieResult.data.redirectUrl) {
-            sessionStorage.setItem('authRedirectUrl', cookieResult.data.redirectUrl)
-        }
-
-        // Clear error state
-        cookieError.value = false
-    }
-
+    const type = detectLoginType()
+    loginType.value = type
     checking.value = false
+    console.log(`✅ Final login type: ${type}`)
 }
 
-const goToMainSite = () => {
-    // Redirect to appropriate main site based on role if known
-    if (userRole.value === 'admin') {
-        window.location.href = 'https://cp.fansmeed.com'
-    } else {
-        window.location.href = 'https://fansmeed.com'
-    }
+const goToAdminSite = () => {
+    window.location.href = 'https://cp.fansmeed.com'
 }
 
-const refreshAndCheck = () => {
-    // Clear any expired cookie
-    clearAuthIntentCookie()
-
-    // Reset error state
-    cookieError.value = false
-    userRole.value = null
-
-    // Re-check for cookie without refreshing the page
-    checkAuthCookie()
+const goToUserSite = () => {
+    window.location.href = 'https://fansmeed.com'
 }
 
 // Initialize
 onMounted(() => {
     getRandomImage()
-    checkAuthCookie()
+    detectUserType()
 })
 </script>

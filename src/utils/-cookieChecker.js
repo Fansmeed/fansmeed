@@ -162,15 +162,12 @@ export function getAuthIntentCookie() {
  * Clear auth intent cookie
  */
 export function clearAuthIntentCookie() {
-    const cookieString = `${COOKIE_CONFIG.NAME}=; ` +
-                       `domain=.fansmeed.com; ` +
-                       `path=/; ` +
-                       `max-age=0; ` +
-                       `expires=Thu, 01 Jan 1970 00:00:00 GMT; ` +
-                       `Secure; ` +
-                       `SameSite=None`;
+    document.cookie = `${COOKIE_CONFIG.NAME}=; ` +
+                     `domain=.fansmeed.com; ` +
+                     `path=/; ` +
+                     `max-age=0; ` +
+                     `expires=Thu, 01 Jan 1970 00:00:00 GMT;`;
     
-    document.cookie = cookieString;
     console.log('🍪 [auth] Auth cookie cleared');
 }
 
