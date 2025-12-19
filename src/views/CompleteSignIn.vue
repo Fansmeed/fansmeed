@@ -74,21 +74,19 @@
 <!-- Location: auth.fansmeed.com/src/views/CompleteSignIn.vue -->
 <script setup>
 import { ref, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { useAuthStore, AUTH_OPERATIONS } from '@/stores/authStore'
 import { useUiStore } from '@/stores/uiStore'
 import { buildRedirectUrl, getRedirectUrlFromParams } from '@/utils/subdomainDetector'
 import ProgressSpinner from 'primevue/progressspinner'
 import Button from 'primevue/button'
 
+const router = useRouter()
 const authStore = useAuthStore()
 const uiStore = useUiStore()
 const signInSuccess = ref(false)
 const redirectInfo = ref(null)
 
-// Cloud Function URL
-const CLOUD_FUNCTION_URL = 'https://us-central1-fansmeed-quiz-app.cloudfunctions.net/setSessionCookie'
-
-// Format error for display
 const formatErrorForDisplay = (error) => {
     if (typeof error === 'string') return error
     if (error?.message) return error.message
@@ -121,65 +119,28 @@ const handleSignIn = async () => {
         // Build secure redirect URL
         const redirectUrl = buildRedirectUrl(userRole, redirectParam)
         
-        // Store redirect info for display
-        redirectInfo.value = {
-            domain: new URL(redirectUrl).hostname,
-            url: redirectUrl
-        }
-
         console.log('✅ Sign-in successful')
         console.log('👤 User role:', userRole)
         console.log('🔗 Redirect to:', redirectUrl)
 
         // Show success state
         signInSuccess.value = true
+        
+        // Store token in sessionStorage temporarily
+        sessionStorage.setItem('auth_token', idToken)
+        sessionStorage.setItem('auth_redirect', redirectUrl)
+        sessionStorage.setItem('auth_role', userRole)
 
-        // ============================================
-        // FIXED: Use POST method with proper encoding
-        // ============================================
-        console.log('📨 Using POST method for secure cookie setting...')
-        
-        // Create a hidden form to POST to Cloud Function
-        const form = document.createElement('form')
-        form.method = 'POST'
-        form.action = CLOUD_FUNCTION_URL
-        form.style.display = 'none'
-        form.enctype = 'application/x-www-form-urlencoded' // IMPORTANT
-        
-        // Add token
-        const tokenInput = document.createElement('input')
-        tokenInput.type = 'hidden'
-        tokenInput.name = 'token'
-        tokenInput.value = idToken
-        form.appendChild(tokenInput)
-        
-        // Add redirect URL
-        const redirectInput = document.createElement('input')
-        redirectInput.type = 'hidden'
-        redirectInput.name = 'redirectUrl'
-        redirectInput.value = redirectUrl
-        form.appendChild(redirectInput)
-        
-        // Add user role
-        const roleInput = document.createElement('input')
-        roleInput.type = 'hidden'
-        roleInput.name = 'userRole'
-        roleInput.value = userRole
-        form.appendChild(roleInput)
-        
-        // Add to page
-        document.body.appendChild(form)
-        
-        console.log('📦 Form created with data:', {
-            token: idToken.substring(0, 20) + '...',
-            redirectUrl: redirectUrl,
-            userRole: userRole
-        })
-        
-        // Submit after a brief delay to show success message
+        // Redirect to our redirect page which will handle the Cloud Function call
         setTimeout(() => {
-            console.log('🚀 Submitting POST form to Cloud Function...')
-            form.submit()
+            router.push({
+                path: '/auth/redirect',
+                query: {
+                    token: idToken,
+                    redirectUrl: redirectUrl,
+                    role: userRole
+                }
+            })
         }, 1500)
 
     } catch (error) {

@@ -9,7 +9,9 @@ setGlobalOptions({
 
 const setSessionCookie = require("./setSessionCookie/index");
 const verifySession = require("./verifySession/index");
+const testCookieSimple = require("./testCookieSimple/index");
 
 // Export functions
 exports.setSessionCookie = setSessionCookie.setSessionCookie;
 exports.verifySessionHttp = verifySession.verifySessionHttp;
+exports.testCookieSimple = testCookieSimple.testCookieSimple;
