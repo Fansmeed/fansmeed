@@ -85,15 +85,31 @@ async function getUserRole(userId) {
  * Build the Set-Cookie header string
  */
 function buildCookieHeader(sessionToken, maxAge = SESSION_DURATION) {
+    // CRITICAL: Include ALL required attributes
     return [
         `${COOKIE_NAME}=${encodeURIComponent(sessionToken)}`,
-        `Domain=.fansmeed.com`,
+        `Domain=.fansmeed.com`,  // Leading dot for all subdomains
         `Path=/`,
         `HttpOnly`,
-        `Secure`,
-        `SameSite=None`,
+        `Secure`,                 // Required for SameSite=None
+        `SameSite=None`,          // Required for cross-domain
         `Max-Age=${maxAge}`
     ].join('; ');
+}
+
+// Also add this helper function for debugging:
+function getCookieHeaderForDebug(sessionToken, maxAge = SESSION_DURATION) {
+    return {
+        name: COOKIE_NAME,
+        value: encodeURIComponent(sessionToken),
+        domain: '.fansmeed.com',
+        path: '/',
+        httpOnly: true,
+        secure: true,
+        sameSite: 'None',
+        maxAge: maxAge,
+        fullHeader: buildCookieHeader(sessionToken, maxAge)
+    };
 }
 
 /**
@@ -118,5 +134,6 @@ module.exports = {
     getUserRole,
     buildCookieHeader,
     buildClearCookieHeader,
+    getCookieHeaderForDebug,  // Add this
     COOKIE_NAME
 };

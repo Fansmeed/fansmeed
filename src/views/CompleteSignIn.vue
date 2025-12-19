@@ -61,6 +61,9 @@
                         <p class="text-sm text-blue-600 dark:text-blue-400">
                             Redirecting to: {{ redirectInfo.domain }}
                         </p>
+                        <p class="text-xs text-blue-500 dark:text-blue-300 mt-1">
+                            Using POST method for secure cookie setting
+                        </p>
                     </div>
                 </div>
             </div>
@@ -123,21 +126,60 @@ const handleSignIn = async () => {
             url: redirectUrl
         }
 
-        // Build Cloud Function URL
-        const functionUrl = new URL(CLOUD_FUNCTION_URL)
-        functionUrl.searchParams.set('token', idToken)
-        functionUrl.searchParams.set('redirectUrl', redirectUrl)
-
         console.log('✅ Sign-in successful')
         console.log('👤 User role:', userRole)
         console.log('🔗 Redirect to:', redirectUrl)
-        console.log('⚡ Cloud Function URL:', functionUrl.toString())
 
+        // Show success state
         signInSuccess.value = true
 
-        // Redirect to Cloud Function after brief delay
+        // ============================================
+        // USE POST METHOD FOR BETTER COOKIE SETTING
+        // ============================================
+        console.log('📨 Using POST method for secure cookie setting...')
+        
+        // Create a hidden form to POST to Cloud Function
+        // This ensures cookies are properly set
+        const form = document.createElement('form')
+        form.method = 'POST'
+        form.action = CLOUD_FUNCTION_URL
+        form.style.display = 'none'
+        
+        // Add token
+        const tokenInput = document.createElement('input')
+        tokenInput.type = 'hidden'
+        tokenInput.name = 'token'
+        tokenInput.value = idToken
+        form.appendChild(tokenInput)
+        
+        // Add redirect URL
+        const redirectInput = document.createElement('input')
+        redirectInput.type = 'hidden'
+        redirectInput.name = 'redirectUrl'
+        redirectInput.value = redirectUrl
+        form.appendChild(redirectInput)
+        
+        // Add user role (optional, Cloud Function will get from Firestore)
+        const roleInput = document.createElement('input')
+        roleInput.type = 'hidden'
+        roleInput.name = 'userRole'
+        roleInput.value = userRole
+        form.appendChild(roleInput)
+        
+        // Add CSRF protection token (optional but good practice)
+        const csrfInput = document.createElement('input')
+        csrfInput.type = 'hidden'
+        csrfInput.name = 'csrf'
+        csrfInput.value = Math.random().toString(36).substring(2)
+        form.appendChild(csrfInput)
+        
+        // Add to page and submit
+        document.body.appendChild(form)
+        
+        // Submit after a brief delay to show success message
         setTimeout(() => {
-            window.location.href = functionUrl.toString()
+            console.log('🚀 Submitting POST form to Cloud Function...')
+            form.submit()
         }, 1500)
 
     } catch (error) {

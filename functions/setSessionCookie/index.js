@@ -1,3 +1,4 @@
+// Location: Cloud Functions/setSessionCookie/index.js
 const { onRequest } = require("firebase-functions/v2/https");
 const admin = require("firebase-admin");
 const {
@@ -19,6 +20,8 @@ exports.setSessionCookie = onRequest(
     },
     async (req, res) => {
         console.log("🎯 Setting session cookie via Cloud Function");
+        console.log("📨 Method:", req.method);
+        console.log("🔗 Referrer:", req.headers.referer || req.headers.referrer);
 
         // Handle CORS preflight
         if (req.method === "OPTIONS") {
@@ -38,14 +41,43 @@ exports.setSessionCookie = onRequest(
         }
 
         try {
-            // Get ID token from query parameter or Authorization header
-            let idToken = req.query.token || req.body.token;
+            let idToken, redirectUrl, userRoleFromRequest;
 
-            if (!idToken && req.headers.authorization) {
-                const authHeader = req.headers.authorization;
-                if (authHeader.startsWith("Bearer ")) {
-                    idToken = authHeader.substring(7);
+            // ============================================
+            // HANDLE POST METHOD
+            // ============================================
+            if (req.method === "POST") {
+                console.log("📨 Cloud Function called via POST");
+                console.log("📦 POST body:", req.body);
+                
+                // Get data from POST body
+                idToken = req.body.token;
+                redirectUrl = req.body.redirectUrl;
+                userRoleFromRequest = req.body.userRole;
+                
+                if (!idToken) {
+                    console.error("❌ No ID token in POST body");
+                    return res.status(400).send("Missing token");
                 }
+            }
+            // ============================================
+            // HANDLE GET METHOD (existing logic)
+            // ============================================
+            else {
+                console.log("🔍 Cloud Function called via GET");
+                console.log("🔍 Query params:", req.query);
+                
+                // Get ID token from query parameter or Authorization header
+                idToken = req.query.token;
+
+                if (!idToken && req.headers.authorization) {
+                    const authHeader = req.headers.authorization;
+                    if (authHeader.startsWith("Bearer ")) {
+                        idToken = authHeader.substring(7);
+                    }
+                }
+
+                redirectUrl = req.query.redirectUrl;
             }
 
             if (!idToken) {
@@ -64,23 +96,27 @@ exports.setSessionCookie = onRequest(
 
             console.log("✅ Token verified for user:", userEmail);
 
-            // Get user role from Firestore
-            const userRole = await getUserRole(userId);
+            // Get user role from Firestore (trust Firestore over request)
+            const userRoleFromFirestore = await getUserRole(userId);
 
-            if (!userRole) {
+            if (!userRoleFromFirestore) {
                 console.error("❌ User role not found or user inactive");
                 res.setHeader("Set-Cookie", buildClearCookieHeader());
                 res.redirect(302, "https://auth.fansmeed.com/auth/login?error=invalid_role");
                 return;
             }
 
-            console.log(`👤 User role determined: ${userRole}`);
+            console.log(`👤 User role from Firestore: ${userRoleFromFirestore}`);
+            
+            // Use role from Firestore (more secure) or from request
+            const userRole = userRoleFromFirestore || userRoleFromRequest;
 
             // Generate session token
             const sessionToken = generateSessionToken(userId, userRole);
-
-            // Get redirect URL (with validation)
-            let redirectUrl = req.query.redirectUrl || req.body.redirectUrl;
+            
+            console.log("🍪 [Cloud Function] Building cookie header...");
+            const cookieHeader = buildCookieHeader(sessionToken);
+            console.log("🍪 [Cloud Function] Cookie header to set:", cookieHeader);
 
             // Validate redirect URL for security
             if (redirectUrl) {
@@ -105,22 +141,30 @@ exports.setSessionCookie = onRequest(
                     : "https://fansmeed.com/";
             }
 
-            // Set CORS headers for cross-origin cookie
+            // Set CORS headers FIRST - CRITICAL FOR COOKIES
             res.set("Access-Control-Allow-Origin", "https://auth.fansmeed.com");
             res.set("Access-Control-Allow-Credentials", "true");
             res.set("Access-Control-Expose-Headers", "Set-Cookie");
 
             // Set the session cookie
-            res.setHeader("Set-Cookie", buildCookieHeader(sessionToken));
+            res.setHeader("Set-Cookie", cookieHeader);
 
-            console.log(`🍪 Session cookie set for ${userRole}`);
-            console.log(`🔄 Redirecting to: ${redirectUrl}`);
+            // Add debug headers
+            res.set("X-Auth-User", userId);
+            res.set("X-Auth-Role", userRole);
+            res.set("X-Cookie-Set", "true");
+            res.set("X-Auth-Debug", `user:${userId},role:${userRole}`);
 
-            // Redirect to target site
+            console.log(`🍪 [Cloud Function] Cookie should be set for ${userRole}`);
+            console.log(`📋 [Cloud Function] Cookie header: ${cookieHeader}`);
+            console.log(`🔗 [Cloud Function] Redirecting to: ${redirectUrl}`);
+
+            // IMPORTANT: Use 302 (temporary) redirect for POST, 302 for GET
             res.redirect(302, redirectUrl);
 
         } catch (error) {
             console.error("❌ Error in setSessionCookie:", error);
+            console.error("❌ Error details:", error.code, error.message);
 
             // Set CORS headers even on error
             res.set("Access-Control-Allow-Origin", "https://auth.fansmeed.com");
