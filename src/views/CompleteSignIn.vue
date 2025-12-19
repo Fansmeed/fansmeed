@@ -71,6 +71,7 @@
     </div>
 </template>
 
+<!-- Location: auth.fansmeed.com/src/views/CompleteSignIn.vue -->
 <script setup>
 import { ref, onMounted } from 'vue'
 import { useAuthStore, AUTH_OPERATIONS } from '@/stores/authStore'
@@ -87,7 +88,7 @@ const redirectInfo = ref(null)
 // Cloud Function URL
 const CLOUD_FUNCTION_URL = 'https://us-central1-fansmeed-quiz-app.cloudfunctions.net/setSessionCookie'
 
-// Format error for display (keep your existing error formatter)
+// Format error for display
 const formatErrorForDisplay = (error) => {
     if (typeof error === 'string') return error
     if (error?.message) return error.message
@@ -134,16 +135,16 @@ const handleSignIn = async () => {
         signInSuccess.value = true
 
         // ============================================
-        // USE POST METHOD FOR BETTER COOKIE SETTING
+        // FIXED: Use POST method with proper encoding
         // ============================================
         console.log('📨 Using POST method for secure cookie setting...')
         
         // Create a hidden form to POST to Cloud Function
-        // This ensures cookies are properly set
         const form = document.createElement('form')
         form.method = 'POST'
         form.action = CLOUD_FUNCTION_URL
         form.style.display = 'none'
+        form.enctype = 'application/x-www-form-urlencoded' // IMPORTANT
         
         // Add token
         const tokenInput = document.createElement('input')
@@ -159,22 +160,21 @@ const handleSignIn = async () => {
         redirectInput.value = redirectUrl
         form.appendChild(redirectInput)
         
-        // Add user role (optional, Cloud Function will get from Firestore)
+        // Add user role
         const roleInput = document.createElement('input')
         roleInput.type = 'hidden'
         roleInput.name = 'userRole'
         roleInput.value = userRole
         form.appendChild(roleInput)
         
-        // Add CSRF protection token (optional but good practice)
-        const csrfInput = document.createElement('input')
-        csrfInput.type = 'hidden'
-        csrfInput.name = 'csrf'
-        csrfInput.value = Math.random().toString(36).substring(2)
-        form.appendChild(csrfInput)
-        
-        // Add to page and submit
+        // Add to page
         document.body.appendChild(form)
+        
+        console.log('📦 Form created with data:', {
+            token: idToken.substring(0, 20) + '...',
+            redirectUrl: redirectUrl,
+            userRole: userRole
+        })
         
         // Submit after a brief delay to show success message
         setTimeout(() => {

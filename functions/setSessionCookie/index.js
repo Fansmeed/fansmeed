@@ -12,16 +12,42 @@ if (!admin.apps.length) {
     admin.initializeApp();
 }
 
+// Helper to parse POST body
+async function parsePostBody(req) {
+    return new Promise((resolve, reject) => {
+        let body = '';
+        req.on('data', chunk => {
+            body += chunk.toString();
+        });
+        req.on('end', () => {
+            try {
+                const params = new URLSearchParams(body);
+                const data = {};
+                for (const [key, value] of params) {
+                    data[key] = value;
+                }
+                resolve(data);
+            } catch (error) {
+                reject(error);
+            }
+        });
+        req.on('error', reject);
+    });
+}
+
 exports.setSessionCookie = onRequest(
     {
         region: "us-central1",
         cors: true,
         maxInstances: 10,
+        cors: ["https://auth.fansmeed.com", "https://cp.fansmeed.com", "https://fansmeed.com"],
     },
     async (req, res) => {
         console.log("🎯 Setting session cookie via Cloud Function");
         console.log("📨 Method:", req.method);
         console.log("🔗 Referrer:", req.headers.referer || req.headers.referrer);
+        console.log("🌐 Origin:", req.headers.origin);
+        console.log("📋 Headers:", JSON.stringify(req.headers, null, 2));
 
         // Handle CORS preflight
         if (req.method === "OPTIONS") {
@@ -48,35 +74,33 @@ exports.setSessionCookie = onRequest(
             // ============================================
             if (req.method === "POST") {
                 console.log("📨 Cloud Function called via POST");
-                console.log("📦 POST body:", req.body);
+                
+                // Parse POST body
+                const body = await parsePostBody(req);
+                console.log("📦 POST body parsed:", body);
                 
                 // Get data from POST body
-                idToken = req.body.token;
-                redirectUrl = req.body.redirectUrl;
-                userRoleFromRequest = req.body.userRole;
+                idToken = body.token;
+                redirectUrl = body.redirectUrl;
+                userRoleFromRequest = body.userRole;
                 
                 if (!idToken) {
                     console.error("❌ No ID token in POST body");
+                    console.error("❌ Available body keys:", Object.keys(body));
                     return res.status(400).send("Missing token");
                 }
+                
+                console.log("✅ POST data received successfully");
             }
             // ============================================
-            // HANDLE GET METHOD (existing logic)
+            // HANDLE GET METHOD
             // ============================================
             else {
                 console.log("🔍 Cloud Function called via GET");
                 console.log("🔍 Query params:", req.query);
                 
-                // Get ID token from query parameter or Authorization header
+                // Get ID token from query parameter
                 idToken = req.query.token;
-
-                if (!idToken && req.headers.authorization) {
-                    const authHeader = req.headers.authorization;
-                    if (authHeader.startsWith("Bearer ")) {
-                        idToken = authHeader.substring(7);
-                    }
-                }
-
                 redirectUrl = req.query.redirectUrl;
             }
 
@@ -96,7 +120,7 @@ exports.setSessionCookie = onRequest(
 
             console.log("✅ Token verified for user:", userEmail);
 
-            // Get user role from Firestore (trust Firestore over request)
+            // Get user role from Firestore
             const userRoleFromFirestore = await getUserRole(userId);
 
             if (!userRoleFromFirestore) {
@@ -108,8 +132,8 @@ exports.setSessionCookie = onRequest(
 
             console.log(`👤 User role from Firestore: ${userRoleFromFirestore}`);
             
-            // Use role from Firestore (more secure) or from request
-            const userRole = userRoleFromFirestore || userRoleFromRequest;
+            // Use role from Firestore (more secure)
+            const userRole = userRoleFromFirestore;
 
             // Generate session token
             const sessionToken = generateSessionToken(userId, userRole);
@@ -141,7 +165,7 @@ exports.setSessionCookie = onRequest(
                     : "https://fansmeed.com/";
             }
 
-            // Set CORS headers FIRST - CRITICAL FOR COOKIES
+            // Set CORS headers
             res.set("Access-Control-Allow-Origin", "https://auth.fansmeed.com");
             res.set("Access-Control-Allow-Credentials", "true");
             res.set("Access-Control-Expose-Headers", "Set-Cookie");
@@ -154,17 +178,18 @@ exports.setSessionCookie = onRequest(
             res.set("X-Auth-Role", userRole);
             res.set("X-Cookie-Set", "true");
             res.set("X-Auth-Debug", `user:${userId},role:${userRole}`);
+            res.set("X-Request-Method", req.method);
 
-            console.log(`🍪 [Cloud Function] Cookie should be set for ${userRole}`);
-            console.log(`📋 [Cloud Function] Cookie header: ${cookieHeader}`);
+            console.log(`🍪 [Cloud Function] Cookie set for ${userRole}`);
             console.log(`🔗 [Cloud Function] Redirecting to: ${redirectUrl}`);
 
-            // IMPORTANT: Use 302 (temporary) redirect for POST, 302 for GET
+            // Redirect
             res.redirect(302, redirectUrl);
 
         } catch (error) {
             console.error("❌ Error in setSessionCookie:", error);
             console.error("❌ Error details:", error.code, error.message);
+            console.error("❌ Error stack:", error.stack);
 
             // Set CORS headers even on error
             res.set("Access-Control-Allow-Origin", "https://auth.fansmeed.com");
