@@ -1,17 +1,15 @@
 const { setGlobalOptions } = require("firebase-functions/v2");
 
-// Set global options using v2 syntax
 setGlobalOptions({ 
   maxInstances: 10,
   timeoutSeconds: 60,
   region: 'us-central1'
 });
 
+const issuePassport = require("./issuePassport/index");
 const setSessionCookie = require("./setSessionCookie/index");
 const verifySession = require("./verifySession/index");
-const testCookieSimple = require("./testCookieSimple/index");
 
-// Export functions
+exports.issuePassport = issuePassport.issuePassport;
 exports.setSessionCookie = setSessionCookie.setSessionCookie;
 exports.verifySessionHttp = verifySession.verifySessionHttp;
-exports.testCookieSimple = testCookieSimple.testCookieSimple;

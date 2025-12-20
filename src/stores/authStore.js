@@ -1,11 +1,10 @@
 // Location: auth.fansmeed.com/src/stores/authStore.js
-// This stays mostly the same as your original, but remove cookie-related code
-
 import { defineStore } from 'pinia';
 import { useUiStore } from './uiStore';
 import {
     auth,
-    db
+    db,
+    functions
 } from '@/firebase/firebaseInit';
 import {
     sendSignInLinkToEmail,
@@ -19,8 +18,12 @@ import {
     sendPasswordResetEmail,
     GoogleAuthProvider,
     FacebookAuthProvider,
-    signInWithPopup
+    signInWithPopup,
+    signInWithCustomToken
 } from "firebase/auth";
+import {
+    httpsCallable
+} from "firebase/functions";
 import {
     collection,
     doc,
@@ -31,9 +34,11 @@ import {
     query,
     where,
     setDoc,
-    deleteDoc
+    deleteDoc,
 } from "firebase/firestore";
+import { getFunctions } from 'firebase/functions';
 import { collectDeviceInfo } from '@/utils/deviceInfo';
+import { buildRedirectUrl, getRedirectUrlFromParams } from '@/utils/subdomainDetector';
 
 // Authentication operations
 export const AUTH_OPERATIONS = {
@@ -52,7 +57,11 @@ export const AUTH_OPERATIONS = {
     CHECK_AUTH: 'CHECK_AUTH',
     LOGOUT: 'LOGOUT',
     FETCH_USER_PROFILE: 'FETCH_USER_PROFILE',
-    SOCIAL_LOGIN: 'SOCIAL_LOGIN'
+    SOCIAL_LOGIN: 'SOCIAL_LOGIN',
+    
+    // NEW: Passport operations
+    REQUEST_PASSPORT: 'REQUEST_PASSPORT',
+    VERIFY_EMAIL_LINK: 'VERIFY_EMAIL_LINK'
 };
 
 // User roles
@@ -181,12 +190,75 @@ async function updateLoginHistory(uid, userData, deviceInfo) {
     }
 }
 
+/**
+ * Get target app from URL parameters
+ */
+// In authStore.js, update the getTargetAppFromUrl function:
+function getTargetAppFromUrl() {
+    const urlParams = new URLSearchParams(window.location.search);
+    const typeParam = urlParams.get('type');
+    
+    console.log('🔍 URL params for target app:', { typeParam });
+    
+    // First priority: URL parameter
+    if (typeParam === 'admin' || typeParam === 'user') {
+        console.log(`✅ Target app from URL param: ${typeParam}`);
+        return typeParam;
+    }
+    
+    // Second priority: Check referrer
+    const referrer = document.referrer;
+    console.log('🔍 Document referrer:', referrer);
+    
+    if (referrer) {
+        try {
+            const referrerUrl = new URL(referrer);
+            const hostname = referrerUrl.hostname;
+            const port = referrerUrl.port;
+            
+            console.log('🔍 Referrer hostname:', hostname, 'port:', port);
+            
+            // Check localhost ports
+            if (hostname === 'localhost') {
+                if (port === '3000' || referrer.includes('localhost:3000')) {
+                    console.log('✅ Target app from localhost referrer: admin');
+                    return 'admin';
+                }
+                if (port === '3001' || referrer.includes('localhost:3001')) {
+                    console.log('✅ Target app from localhost referrer: user');
+                    return 'user';
+                }
+            }
+            
+            // Check production domains
+            if (hostname === 'cp.fansmeed.com' || hostname.startsWith('cp.')) {
+                console.log('✅ Target app from production referrer: admin');
+                return 'admin';
+            }
+            
+            if (hostname === 'fansmeed.com') {
+                console.log('✅ Target app from production referrer: user');
+                return 'user';
+            }
+        } catch (error) {
+            console.warn('Error parsing referrer:', error);
+        }
+    }
+    
+    // Default fallback
+    console.log('⚠️ Could not determine target app, defaulting to user');
+    return 'user';
+}
+
 export const useAuthStore = defineStore('auth', {
     state: () => ({
         currentUser: null,
         userProfile: null,
         authChecked: false,
-        userRole: null
+        userRole: null,
+        // NEW: Store passport information
+        passportRequested: false,
+        lastTargetApp: null
     }),
 
     getters: {
@@ -283,6 +355,9 @@ export const useAuthStore = defineStore('auth', {
 
                         // Determine user role
                         await this.determineUserRole(result.user);
+
+                        // NEW: After successful login, redirect to complete auth flow
+                        await this.handlePostLoginRedirect();
 
                         // Return success data
                         return {
@@ -435,6 +510,9 @@ export const useAuthStore = defineStore('auth', {
                         const deviceInfo = await collectDeviceInfo();
                         await updateLoginHistory(userUid, { role: USER_ROLES.USER }, deviceInfo);
 
+                        // NEW: After successful social login, redirect to complete auth flow
+                        await this.handlePostLoginRedirect();
+
                         // Return success
                         return {
                             user: result.user,
@@ -517,7 +595,7 @@ export const useAuthStore = defineStore('auth', {
                     }
 
                     const actionCodeSettings = {
-                        url: `${window.location.origin}/auth/complete-signin?email=${encodeURIComponent(email)}`,
+                        url: `${window.location.origin}/auth/complete-signin?type=admin&email=${encodeURIComponent(email)}`,
                         handleCodeInApp: true
                     };
 
@@ -532,7 +610,73 @@ export const useAuthStore = defineStore('auth', {
         },
 
         /**
-         * Complete sign-in (for email link authentication)
+         * NEW: Request passport (custom token) for target app
+         */
+        async requestPassport(targetApp) {
+            const uiStore = useUiStore();
+            const key = AUTH_OPERATIONS.REQUEST_PASSPORT;
+
+            return await uiStore.withOperation(
+                key,
+                async () => {
+                    try {
+                        // Get current user
+                        const user = auth.currentUser;
+                        if (!user) {
+                            throw new Error('User not authenticated. Please login first.');
+                        }
+
+                        console.log(`🎫 Requesting passport for ${targetApp}...`);
+                        console.log(`👤 Current user UID: ${user.uid}`);
+                        console.log(`📧 User email: ${user.email}`);
+
+                        // Get ID token for authentication
+                        const idToken = await user.getIdToken(true);
+                        console.log('✅ ID token obtained');
+
+                        // Initialize functions if not already done
+                        if (!functions) {
+                            console.error('❌ Firebase Functions not initialized');
+                            throw new Error('Firebase Functions not available');
+                        }
+
+                        // Call the Gatekeeper Cloud Function
+                        const issuePassport = httpsCallable(functions, 'issuePassport');
+                        
+                        const result = await issuePassport({ 
+                            targetApp: targetApp 
+                        }, {
+                            headers: {
+                                'Authorization': `Bearer ${idToken}`
+                            }
+                        });
+
+                        console.log(`✅ Passport received for ${targetApp}:`, result.data);
+                        
+                        // Store for debugging
+                        this.lastTargetApp = targetApp;
+                        this.passportRequested = true;
+                        
+                        return result.data;
+
+                    } catch (error) {
+                        console.error('❌ Passport request failed:', error);
+                        
+                        // Handle specific errors
+                        if (error.code === 'permission-denied') {
+                            throw new Error('You do not have permission to access this application.');
+                        } else if (error.code === 'unauthenticated') {
+                            throw new Error('Authentication required. Please login again.');
+                        }
+                        
+                        throw new Error(`Failed to obtain access: ${error.message}`);
+                    }
+                }
+            );
+        },
+
+        /**
+         * Complete sign-in (for email link authentication) - UPDATED
          */
         async completeSignIn(url) {
             const uiStore = useUiStore();
@@ -541,14 +685,14 @@ export const useAuthStore = defineStore('auth', {
             return await uiStore.withOperation(
                 key,
                 async () => {
-                    console.log('🔐 Starting completeSignIn with URL:', url);
+                    console.log('🔐 [Auth] Starting completeSignIn with URL:', url);
 
                     if (!isSignInWithEmailLink(auth, url)) {
                         throw new Error("Invalid or expired sign-in link");
                     }
 
                     const email = extractEmailFromSignInLink(url);
-                    console.log('🔐 Extracted email:', email);
+                    console.log('🔐 [Auth] Extracted email:', email);
 
                     if (!email) {
                         throw new Error("Email not found in the link. Please request a new sign-in link.");
@@ -561,7 +705,7 @@ export const useAuthStore = defineStore('auth', {
                         }
 
                         const userUid = result.user.uid;
-                        console.log('🔐 User signed in with UID:', userUid);
+                        console.log('🔐 [Auth] User signed in with UID:', userUid);
 
                         // Determine if this is a user or admin
                         let userDoc = await findUserByEmail(email, COLLECTIONS.USERS);
@@ -582,7 +726,7 @@ export const useAuthStore = defineStore('auth', {
 
                         // Migrate if needed
                         if (userData.requiresUidMigration) {
-                            console.log('🔄 Migrating from temporary UID to real UID...');
+                            console.log('🔄 [Auth] Migrating from temporary UID to real UID...');
                             await migrateToRealUid(userDoc.id, userUid, collectionName);
                         }
 
@@ -610,12 +754,15 @@ export const useAuthStore = defineStore('auth', {
                             uid: userUid
                         };
 
-                        console.log(`🔐 ${userRole.toUpperCase()} sign-in completed successfully`);
+                        console.log(`🔐 [Auth] ${userRole.toUpperCase()} sign-in completed successfully`);
+
+                        // NEW: Handle post-login redirect
+                        await this.handlePostLoginRedirect();
 
                         return result.user;
 
                     } catch (firebaseError) {
-                        console.error('🔐 Firebase sign-in error:', firebaseError);
+                        console.error('🔐 [Auth] Firebase sign-in error:', firebaseError);
                         throw firebaseError;
                     }
                 }
@@ -623,23 +770,109 @@ export const useAuthStore = defineStore('auth', {
         },
 
         /**
-         * Verify email (for new user registrations)
+         * NEW: Handle post-login redirect (common for all login methods)
+         */
+        // In authStore.js, update handlePostLoginRedirect:
+async handlePostLoginRedirect() {
+    try {
+        console.log('🔄 [Auth] Handling post-login redirect...');
+        console.log('📍 Current URL:', window.location.href);
+        console.log('📍 Hostname:', window.location.hostname);
+        console.log('📍 Port:', window.location.port);
+        
+        // Get target app from URL parameters
+        const targetApp = getTargetAppFromUrl();
+        console.log(`🎯 [Auth] Target app determined: ${targetApp}`);
+        
+        // Get redirect URL from params
+        const urlParams = new URLSearchParams(window.location.search);
+        const redirectParam = urlParams.get('redirect');
+        console.log('🔗 Redirect param from URL:', redirectParam);
+        
+        // Build redirect URL
+        let redirectUrl;
+        if (redirectParam) {
+            // Validate redirect URL
+            try {
+                const url = new URL(redirectParam);
+                const allowedDomains = ['cp.fansmeed.com', 'fansmeed.com', 'localhost'];
+                
+                if (allowedDomains.some(domain => 
+                    url.hostname === domain || url.hostname.endsWith(`.${domain}`)
+                )) {
+                    redirectUrl = redirectParam;
+                    console.log('✅ Using valid redirect URL from params:', redirectUrl);
+                } else {
+                    console.warn('⚠️ Invalid redirect domain:', url.hostname);
+                }
+            } catch (error) {
+                console.warn('⚠️ Invalid redirect URL format:', error);
+            }
+        }
+        
+        // Use default if no valid redirect
+        if (!redirectUrl) {
+            redirectUrl = buildRedirectUrl(targetApp);
+            console.log(`🔗 Using default redirect for ${targetApp}: ${redirectUrl}`);
+        }
+        
+        console.log(`🔗 [Auth] Final redirect URL: ${redirectUrl}`);
+        
+        // Request passport for the target app
+        console.log(`🎫 [Auth] Requesting passport for ${targetApp}...`);
+        console.log(`👤 Current user UID: ${this.currentUser?.uid}`);
+        console.log(`📧 Current user email: ${this.currentUser?.email}`);
+        
+        const passport = await this.requestPassport(targetApp);
+        
+        if (!passport || !passport.token) {
+            throw new Error('Failed to obtain passport token');
+        }
+        
+        console.log('✅ [Auth] Passport obtained, redirecting to set session...');
+        console.log('🎫 Passport role:', passport.role);
+        console.log('🎫 Passport token (first 20 chars):', passport.token.substring(0, 20) + '...');
+        
+        // Build Cloud Function URL
+        const cloudFunctionUrl = `https://us-central1-fansmeed-quiz-app.cloudfunctions.net/setSessionCookie?token=${encodeURIComponent(passport.token)}&redirectUrl=${encodeURIComponent(redirectUrl)}&role=${passport.role}`;
+        
+        console.log(`🔄 [Auth] Redirecting to Cloud Function: ${cloudFunctionUrl}`);
+        window.location.href = cloudFunctionUrl;
+        
+    } catch (error) {
+        console.error('❌ [Auth] Post-login redirect failed:', error);
+        console.error('❌ Error details:', {
+            message: error.message,
+            operation: error.operation,
+            isTimeout: error.isTimeout
+        });
+        
+        // Show error to user but stay on page
+        const uiStore = useUiStore();
+        uiStore.setError(AUTH_OPERATIONS.REQUEST_PASSPORT, error.message || 'Failed to redirect after login');
+        
+        return false;
+    }
+},
+
+        /**
+         * Verify email (for new user registrations) - UPDATED
          */
         async verifyEmail(url) {
             const uiStore = useUiStore();
-            const key = AUTH_OPERATIONS.USER_VERIFY_EMAIL;
+            const key = AUTH_OPERATIONS.VERIFY_EMAIL_LINK;
 
             return await uiStore.withOperation(
                 key,
                 async () => {
-                    console.log('🔐 Starting email verification with URL:', url);
+                    console.log('🔐 [Auth] Starting email verification with URL:', url);
 
                     if (!isSignInWithEmailLink(auth, url)) {
                         throw new Error("Invalid or expired verification link");
                     }
 
                     const email = extractEmailFromSignInLink(url);
-                    console.log('🔐 Extracted email for verification:', email);
+                    console.log('🔐 [Auth] Extracted email for verification:', email);
 
                     if (!email) {
                         throw new Error("Email not found in the verification link.");
@@ -652,7 +885,7 @@ export const useAuthStore = defineStore('auth', {
                         }
 
                         const userUid = result.user.uid;
-                        console.log('🔐 User verified with UID:', userUid);
+                        console.log('🔐 [Auth] User verified with UID:', userUid);
 
                         // Find and migrate user
                         const userDoc = await findUserByEmail(email, COLLECTIONS.USERS);
@@ -664,7 +897,7 @@ export const useAuthStore = defineStore('auth', {
 
                         // Migrate if needed
                         if (userData.requiresUidMigration) {
-                            console.log('🔄 Migrating verified user...');
+                            console.log('🔄 [Auth] Migrating verified user...');
                             await migrateToRealUid(userDoc.id, userUid, COLLECTIONS.USERS);
                         }
 
@@ -688,12 +921,15 @@ export const useAuthStore = defineStore('auth', {
                             emailVerified: true
                         };
 
-                        console.log('✅ Email verification completed successfully');
+                        console.log('✅ [Auth] Email verification completed successfully');
+
+                        // NEW: After verification, handle redirect
+                        await this.handlePostLoginRedirect();
 
                         return result.user;
 
                     } catch (error) {
-                        console.error('🔐 Email verification error:', error);
+                        console.error('🔐 [Auth] Email verification error:', error);
                         throw error;
                     }
                 }
@@ -790,9 +1026,11 @@ export const useAuthStore = defineStore('auth', {
             this.userProfile = null;
             this.authChecked = false;
             this.userRole = null;
+            this.passportRequested = false;
+            this.lastTargetApp = null;
 
             sessionStorage.clear();
-            console.log('🔐 Auth store cleaned up');
+            console.log('🔐 [Auth] Auth store cleaned up');
         }
     },
 

@@ -1,11 +1,11 @@
 // Location: auth.fansmeed.com/src/utils/subdomainDetector.js
+import { ENV, getMyType } from '@/config'
 
 /**
  * Detect user type based on URL parameters or referrer
- * @returns {string} 'admin', 'user', or 'unknown'
  */
 export function detectLoginType() {
-    console.log('🔍 Detecting login type...');
+    console.log('🔍 Detecting login type...')
     
     // 1. First check URL parameter
     const urlParams = new URLSearchParams(window.location.search);
@@ -29,12 +29,14 @@ export function detectLoginType() {
             
             console.log('🔍 Referrer hostname:', hostname);
             
-            if (hostname === 'cp.fansmeed.com' || hostname.startsWith('cp.')) {
+            // Check against ENV config for both local and production
+            if (hostname === ENV.apps.admin.replace('http://', '').replace('https://', '').split('/')[0] ||
+                hostname.includes('cp.')) {
                 console.log('✅ Login type from referrer: admin');
                 return 'admin';
             }
             
-            if (hostname === 'fansmeed.com') {
+            if (hostname === ENV.apps.user.replace('http://', '').replace('https://', '').split('/')[0]) {
                 console.log('✅ Login type from referrer: user');
                 return 'user';
             }
@@ -43,43 +45,51 @@ export function detectLoginType() {
         }
     }
     
-    // 3. No referrer or type param - direct access to auth.fansmeed.com
+    // 3. No referrer or type param - direct access to auth hub
     console.log('⚠️ Direct access to auth domain - type unknown');
     return 'unknown';
 }
 
 /**
- * Get target domain based on user type
+ * Get target domain based on user type - USING ENV CONFIG
  */
 export function getTargetDomain(userType) {
-    return userType === 'admin' ? 'cp.fansmeed.com' : 'fansmeed.com';
+    if (userType === 'admin') return ENV.apps.admin;
+    return ENV.apps.user;
 }
 
 /**
- * Build redirect URL after auth
+ * Build redirect URL after auth - USING ENV CONFIG
  */
+// In subdomainDetector.js, update buildRedirectUrl:
 export function buildRedirectUrl(userType, redirectParam = null) {
-    let redirectUrl = redirectParam || `https://${getTargetDomain(userType)}/`;
-    
-    console.log(`🔗 Building redirect URL for ${userType}:`, redirectParam);
-    
-    // Validate URL for security
-    try {
-        const url = new URL(redirectUrl);
-        const allowedDomains = ['cp.fansmeed.com', 'fansmeed.com'];
-        
-        if (!allowedDomains.some(domain => 
-            url.hostname === domain || url.hostname.endsWith(`.${domain}`)
-        )) {
-            console.warn('⚠️ Invalid redirect domain, using default');
-            redirectUrl = `https://${getTargetDomain(userType)}/`;
-        }
-    } catch (error) {
-        console.warn('⚠️ Invalid redirect URL:', error);
-        redirectUrl = `https://${getTargetDomain(userType)}/`;
+    // If we have a redirect param, use it
+    if (redirectParam) {
+        console.log(`🔗 Using provided redirect URL: ${redirectParam}`);
+        return redirectParam;
     }
     
-    console.log(`✅ Final redirect URL: ${redirectUrl}`);
+    // Otherwise build based on userType and environment
+    let redirectUrl;
+    
+    if (window.location.hostname === 'localhost') {
+        // Local development
+        if (userType === 'admin') {
+            redirectUrl = 'http://localhost:3000/';
+        } else {
+            redirectUrl = 'http://localhost:3001/';
+        }
+        console.log(`🔗 Built localhost redirect for ${userType}: ${redirectUrl}`);
+    } else {
+        // Production
+        if (userType === 'admin') {
+            redirectUrl = 'https://cp.fansmeed.com/';
+        } else {
+            redirectUrl = 'https://fansmeed.com/';
+        }
+        console.log(`🔗 Built production redirect for ${userType}: ${redirectUrl}`);
+    }
+    
     return redirectUrl;
 }
 
@@ -93,7 +103,10 @@ export function getRedirectUrlFromParams() {
     if (redirectUrl) {
         try {
             const url = new URL(redirectUrl);
-            const allowedDomains = ['cp.fansmeed.com', 'fansmeed.com'];
+            const allowedDomains = [
+                ENV.apps.admin.replace('http://', '').replace('https://', '').split('/')[0],
+                ENV.apps.user.replace('http://', '').replace('https://', '').split('/')[0]
+            ];
             
             if (allowedDomains.some(domain => 
                 url.hostname === domain || url.hostname.endsWith(`.${domain}`)
