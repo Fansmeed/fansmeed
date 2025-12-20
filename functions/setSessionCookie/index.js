@@ -12,6 +12,7 @@ if (!admin.apps.length) {
     admin.initializeApp();
 }
 
+// In functions/setSessionCookie/index.js
 exports.setSessionCookie = onRequest(
     {
         region: "us-central1",
@@ -33,55 +34,46 @@ exports.setSessionCookie = onRequest(
 
         try {
             // Get parameters from query
-            const idToken = req.query.token;
+            const sessionToken = req.query.token; // Now a session token, not Firebase token
             const redirectUrl = req.query.redirectUrl;
+            const userRole = req.query.role;
+            const firestoreDocId = req.query.firestoreDocId || req.query.userId;
 
             console.log("🔗 Redirect URL:", redirectUrl);
-            console.log("🔐 Token present:", !!idToken);
+            console.log("🎭 Role from query:", userRole);
+            console.log("📄 Firestore Doc ID:", firestoreDocId);
 
-            if (!idToken) {
-                console.error("❌ No ID token provided");
+            if (!sessionToken) {
+                console.error("❌ No session token provided");
                 res.setHeader("Set-Cookie", buildClearCookieHeader());
                 res.redirect(302, "https://auth.fansmeed.com/auth/login?error=no_token");
                 return;
             }
 
-            console.log("🔐 Verifying ID token...");
-
-            // Verify token with timeout
-            const decodedToken = await admin.auth().verifyIdToken(idToken);
-            const userId = decodedToken.uid;
-            const userEmail = decodedToken.email;
-
-            console.log("✅ Token verified for user:", userEmail);
-
-            // Get user role - with fallback to query param if Firestore fails
-            let userRole = req.query.role;
+            // Validate the session token
+            const sessionData = validateSessionToken(sessionToken);
             
-            try {
-                const firestoreRole = await getUserRole(userId);
-                if (firestoreRole) {
-                    userRole = firestoreRole;
-                    console.log("✅ User role from Firestore:", userRole);
-                } else if (userRole) {
-                    console.log("⚠️ Using role from query param:", userRole);
-                } else {
-                    throw new Error("No role found");
-                }
-            } catch (firestoreError) {
-                console.warn("⚠️ Firestore role lookup failed:", firestoreError.message);
-                if (!userRole) {
-                    // Default to user if no role found
-                    userRole = 'user';
-                    console.log("⚠️ Defaulting to role:", userRole);
-                }
+            if (!sessionData) {
+                console.error("❌ Invalid session token");
+                res.setHeader("Set-Cookie", buildClearCookieHeader());
+                res.redirect(302, "https://auth.fansmeed.com/auth/login?error=invalid_token");
+                return;
             }
 
-            // Generate session token
-            const sessionToken = generateSessionToken(userId, userRole);
+            console.log("✅ Session token validated:", sessionData);
+            
+            // Use the data from the session token
+            const userId = sessionData.userId;
+            const role = sessionData.role || userRole;
+            
+            console.log("👤 User ID from token:", userId);
+            console.log("🎭 Role from token:", role);
+
+            // Generate final session token for cookie
+            const finalSessionToken = generateSessionToken(userId, role);
             
             console.log("🍪 Building cookie header...");
-            const cookieHeader = buildCookieHeader(sessionToken);
+            const cookieHeader = buildCookieHeader(finalSessionToken);
             console.log("🍪 Cookie header to set:", cookieHeader);
 
             // Validate redirect URL
@@ -89,9 +81,15 @@ exports.setSessionCookie = onRequest(
             if (finalRedirectUrl) {
                 try {
                     const url = new URL(finalRedirectUrl);
-                    const allowedDomains = ["cp.fansmeed.com", "fansmeed.com"];
-
-                    if (!allowedDomains.some(domain => url.hostname === domain || url.hostname.endsWith(`.${domain}`))) {
+                    const allowedDomains = ["cp.fansmeed.com", "fansmeed.com", "localhost"];
+                    
+                    // Check for localhost in development
+                    const isLocalhost = url.hostname === "localhost";
+                    const isAllowedDomain = allowedDomains.some(domain => 
+                        url.hostname === domain || url.hostname.endsWith(`.${domain}`)
+                    );
+                    
+                    if (!isLocalhost && !isAllowedDomain) {
                         console.warn("⚠️ Invalid redirect domain, using default");
                         finalRedirectUrl = null;
                     }
@@ -103,31 +101,39 @@ exports.setSessionCookie = onRequest(
 
             // Set default redirect
             if (!finalRedirectUrl) {
-                finalRedirectUrl = userRole === "admin"
+                finalRedirectUrl = role === "admin"
                     ? "https://cp.fansmeed.com/"
                     : "https://fansmeed.com/";
+                    
+                // Adjust for localhost
+                if (req.headers.host && req.headers.host.includes('localhost')) {
+                    finalRedirectUrl = role === "admin"
+                        ? "http://localhost:3000/"
+                        : "http://localhost:3001/";
+                }
             }
 
             console.log("🔧 Setting response headers...");
             
-            // CRITICAL: Set CORS headers
-            res.set("Access-Control-Allow-Origin", "https://auth.fansmeed.com");
+            // Set CORS headers
+            res.set("Access-Control-Allow-Origin", "*");
             res.set("Access-Control-Allow-Credentials", "true");
             res.set("Access-Control-Expose-Headers", "Set-Cookie");
             
             // Set the session cookie
             res.setHeader("Set-Cookie", cookieHeader);
             
-            // Add debug headers for troubleshooting
+            // Add debug headers
             res.set("X-Auth-User", userId);
-            res.set("X-Auth-Role", userRole);
+            res.set("X-Auth-Role", role);
+            res.set("X-Firestore-DocId", firestoreDocId || userId);
             res.set("X-Cookie-Set", "true");
             res.set("X-Redirect-To", finalRedirectUrl);
 
-            console.log(`✅ Cookie should be set for ${userRole}`);
+            console.log(`✅ Cookie set for ${role} (User: ${userId})`);
             console.log(`🔄 Redirecting to: ${finalRedirectUrl}`);
 
-            // Use 302 redirect (temporary)
+            // Use 302 redirect
             res.redirect(302, finalRedirectUrl);
 
         } catch (error) {
@@ -135,7 +141,7 @@ exports.setSessionCookie = onRequest(
             console.error("❌ Error stack:", error.stack);
 
             // Set CORS headers
-            res.set("Access-Control-Allow-Origin", "https://auth.fansmeed.com");
+            res.set("Access-Control-Allow-Origin", "*");
             res.set("Access-Control-Allow-Credentials", "true");
 
             // Clear any invalid cookie
@@ -144,14 +150,12 @@ exports.setSessionCookie = onRequest(
             // Determine error message
             let errorMessage = "authentication_failed";
             
-            if (error.code === "auth/id-token-expired") {
-                errorMessage = "token_expired";
-            } else if (error.code === "auth/id-token-revoked") {
-                errorMessage = "token_revoked";
-            } else if (error.code === "auth/invalid-id-token") {
+            if (error.message.includes("Invalid session token")) {
                 errorMessage = "invalid_token";
             } else if (error.message.includes("timeout")) {
                 errorMessage = "timeout";
+            } else if (error.message.includes("Account not found")) {
+                errorMessage = "account_not_found";
             }
 
             console.log(`🔀 Redirecting to error: ${errorMessage}`);

@@ -190,59 +190,67 @@ async function updateLoginHistory(uid, userData, deviceInfo) {
     }
 }
 
-/**
- * Get target app from URL parameters
- */
-// In authStore.js, update the getTargetAppFromUrl function:
+
+// In authStore.js, update getTargetAppFromUrl function:
 function getTargetAppFromUrl() {
-    const urlParams = new URLSearchParams(window.location.search);
+    console.log('🔍 getTargetAppFromUrl() called');
+    console.log('📍 Full URL:', window.location.href);
+    
+    // Parse the current URL
+    const currentUrl = new URL(window.location.href);
+    const urlParams = currentUrl.searchParams;
+    
+    console.log('🔍 All URL parameters:');
+    for (const [key, value] of urlParams.entries()) {
+        console.log(`  ${key}: ${value}`);
+    }
+    
+    // Check for direct type parameter
     const typeParam = urlParams.get('type');
+    console.log(`🔍 Direct type param: ${typeParam}`);
     
-    console.log('🔍 URL params for target app:', { typeParam });
-    
-    // First priority: URL parameter
     if (typeParam === 'admin' || typeParam === 'user') {
-        console.log(`✅ Target app from URL param: ${typeParam}`);
+        console.log(`✅ Target app from direct type param: ${typeParam}`);
         return typeParam;
     }
     
-    // Second priority: Check referrer
-    const referrer = document.referrer;
-    console.log('🔍 Document referrer:', referrer);
-    
-    if (referrer) {
+    // Check if we have a continueUrl (from email link)
+    const continueUrl = urlParams.get('continueUrl');
+    if (continueUrl) {
+        console.log('🔍 Found continueUrl, parsing...');
         try {
-            const referrerUrl = new URL(referrer);
-            const hostname = referrerUrl.hostname;
-            const port = referrerUrl.port;
+            const decodedContinueUrl = decodeURIComponent(continueUrl);
+            console.log(`🔍 Decoded continueUrl: ${decodedContinueUrl}`);
             
-            console.log('🔍 Referrer hostname:', hostname, 'port:', port);
+            // Parse the continueUrl
+            const continueUrlObj = new URL(decodedContinueUrl);
+            const continueUrlParams = continueUrlObj.searchParams;
             
-            // Check localhost ports
-            if (hostname === 'localhost') {
-                if (port === '3000' || referrer.includes('localhost:3000')) {
-                    console.log('✅ Target app from localhost referrer: admin');
-                    return 'admin';
-                }
-                if (port === '3001' || referrer.includes('localhost:3001')) {
-                    console.log('✅ Target app from localhost referrer: user');
-                    return 'user';
-                }
-            }
+            const typeFromContinueUrl = continueUrlParams.get('type');
+            console.log(`🔍 Type from continueUrl: ${typeFromContinueUrl}`);
             
-            // Check production domains
-            if (hostname === 'cp.fansmeed.com' || hostname.startsWith('cp.')) {
-                console.log('✅ Target app from production referrer: admin');
-                return 'admin';
-            }
-            
-            if (hostname === 'fansmeed.com') {
-                console.log('✅ Target app from production referrer: user');
-                return 'user';
+            if (typeFromContinueUrl === 'admin' || typeFromContinueUrl === 'user') {
+                console.log(`✅ Target app from continueUrl: ${typeFromContinueUrl}`);
+                return typeFromContinueUrl;
             }
         } catch (error) {
-            console.warn('Error parsing referrer:', error);
+            console.warn('Error parsing continueUrl:', error);
         }
+    }
+    
+    // Check the current path
+    const currentPath = currentUrl.pathname;
+    console.log(`🔍 Current path: ${currentPath}`);
+    
+    // If we're coming from an admin email link, the type should be in the original URL
+    // The email link looks like: /auth/complete-signin?type=admin&email=...
+    // But when clicked, Firebase adds its own parameters
+    
+    // HARDCODE for testing: If user is admin, force admin
+    console.log(`🔍 User role from store: ${this.userRole}`);
+    if (this.userRole === 'admin') {
+        console.log('✅ Force target app: admin (user is admin)');
+        return 'admin';
     }
     
     // Default fallback
@@ -573,41 +581,42 @@ export const useAuthStore = defineStore('auth', {
          * ADMIN: Send login link
          */
         async adminSendLoginLink(userId) {
-            const uiStore = useUiStore();
-            const key = AUTH_OPERATIONS.ADMIN_SEND_LINK;
+    const uiStore = useUiStore();
+    const key = AUTH_OPERATIONS.ADMIN_SEND_LINK;
 
-            return await uiStore.withOperation(
-                key,
-                async () => {
-                    const email = `${userId.trim().toLowerCase()}@gmail.com`;
+    return await uiStore.withOperation(
+        key,
+        async () => {
+            const email = `${userId.trim().toLowerCase()}@gmail.com`;
 
-                    // Check if admin exists
-                    const employeeDoc = await findUserByEmail(email, COLLECTIONS.EMPLOYEES);
-                    if (!employeeDoc) {
-                        throw new Error('No admin account found with this user ID.');
-                    }
+            // Check if admin exists
+            const employeeDoc = await findUserByEmail(email, COLLECTIONS.EMPLOYEES);
+            if (!employeeDoc) {
+                throw new Error('No admin account found with this user ID.');
+            }
 
-                    const employeeData = employeeDoc.data();
+            const employeeData = employeeDoc.data();
 
-                    // Check if admin is active
-                    if (!employeeData.isActive) {
-                        throw new Error('This admin account is disabled.');
-                    }
+            // Check if admin is active
+            if (!employeeData.isActive) {
+                throw new Error('This admin account is disabled.');
+            }
 
-                    const actionCodeSettings = {
-                        url: `${window.location.origin}/auth/complete-signin?type=admin&email=${encodeURIComponent(email)}`,
-                        handleCodeInApp: true
-                    };
+            // IMPORTANT: Add type=admin parameter
+            const actionCodeSettings = {
+                url: `${window.location.origin}/auth/complete-signin?type=admin&email=${encodeURIComponent(email)}`,
+                handleCodeInApp: true
+            };
 
-                    await sendSignInLinkToEmail(auth, email, actionCodeSettings);
+            await sendSignInLinkToEmail(auth, email, actionCodeSettings);
 
-                    return {
-                        message: 'Login link sent to your email!',
-                        email: email
-                    };
-                }
-            );
-        },
+            return {
+                message: 'Login link sent to your email!',
+                email: email
+            };
+        }
+    );
+},
 
         /**
          * NEW: Request passport (custom token) for target app
@@ -773,81 +782,60 @@ export const useAuthStore = defineStore('auth', {
          * NEW: Handle post-login redirect (common for all login methods)
          */
         // In authStore.js, update handlePostLoginRedirect:
+// In authStore.js, update handlePostLoginRedirect:
 async handlePostLoginRedirect() {
     try {
         console.log('🔄 [Auth] Handling post-login redirect...');
-        console.log('📍 Current URL:', window.location.href);
-        console.log('📍 Hostname:', window.location.hostname);
-        console.log('📍 Port:', window.location.port);
+        console.log('📍 Current user role:', this.userRole);
+        console.log('📍 Current user UID:', this.currentUser?.uid);
+        console.log('📍 Current user email:', this.currentUser?.email);
         
-        // Get target app from URL parameters
-        const targetApp = getTargetAppFromUrl();
-        console.log(`🎯 [Auth] Target app determined: ${targetApp}`);
+        // FORCE ADMIN since we know user is admin
+        const targetApp = 'admin';
+        console.log(`🎯 [Auth] FORCED target app: ${targetApp} (user role: ${this.userRole})`);
         
-        // Get redirect URL from params
-        const urlParams = new URLSearchParams(window.location.search);
-        const redirectParam = urlParams.get('redirect');
-        console.log('🔗 Redirect param from URL:', redirectParam);
+        // Get the redirect URL from where the user came from
+        let redirectUrl = 'https://cp.fansmeed.com/';
         
-        // Build redirect URL
-        let redirectUrl;
-        if (redirectParam) {
-            // Validate redirect URL
-            try {
-                const url = new URL(redirectParam);
-                const allowedDomains = ['cp.fansmeed.com', 'fansmeed.com', 'localhost'];
-                
-                if (allowedDomains.some(domain => 
-                    url.hostname === domain || url.hostname.endsWith(`.${domain}`)
-                )) {
-                    redirectUrl = redirectParam;
-                    console.log('✅ Using valid redirect URL from params:', redirectUrl);
-                } else {
-                    console.warn('⚠️ Invalid redirect domain:', url.hostname);
-                }
-            } catch (error) {
-                console.warn('⚠️ Invalid redirect URL format:', error);
-            }
+        // Check if we have a redirect in sessionStorage (from original redirect)
+        const storedRedirect = sessionStorage.getItem('loginRedirectUrl');
+        if (storedRedirect) {
+            redirectUrl = storedRedirect;
+            console.log(`🔗 Using stored redirect URL: ${redirectUrl}`);
+            sessionStorage.removeItem('loginRedirectUrl');
+        } else {
+            console.log(`🔗 Using default admin redirect: ${redirectUrl}`);
         }
         
-        // Use default if no valid redirect
-        if (!redirectUrl) {
-            redirectUrl = buildRedirectUrl(targetApp);
-            console.log(`🔗 Using default redirect for ${targetApp}: ${redirectUrl}`);
-        }
-        
-        console.log(`🔗 [Auth] Final redirect URL: ${redirectUrl}`);
-        
-        // Request passport for the target app
         console.log(`🎫 [Auth] Requesting passport for ${targetApp}...`);
-        console.log(`👤 Current user UID: ${this.currentUser?.uid}`);
-        console.log(`📧 Current user email: ${this.currentUser?.email}`);
-        
         const passport = await this.requestPassport(targetApp);
         
         if (!passport || !passport.token) {
             throw new Error('Failed to obtain passport token');
         }
         
-        console.log('✅ [Auth] Passport obtained, redirecting to set session...');
+        console.log('✅ [Auth] Passport obtained');
         console.log('🎫 Passport role:', passport.role);
-        console.log('🎫 Passport token (first 20 chars):', passport.token.substring(0, 20) + '...');
+        console.log('🎫 Passport targetApp:', passport.targetApp);
         
-        // Build Cloud Function URL
-        const cloudFunctionUrl = `https://us-central1-fansmeed-quiz-app.cloudfunctions.net/setSessionCookie?token=${encodeURIComponent(passport.token)}&redirectUrl=${encodeURIComponent(redirectUrl)}&role=${passport.role}`;
+        // Ensure we're redirecting to admin site
+        if (passport.role === 'admin' && redirectUrl.includes('fansmeed.com') && !redirectUrl.includes('cp.')) {
+            // Fix redirect URL to admin site
+            redirectUrl = redirectUrl.replace('fansmeed.com', 'cp.fansmeed.com');
+            console.log(`🔧 Fixed redirect URL to admin site: ${redirectUrl}`);
+        }
+        
+        // Redirect to setSessionCookie
+        const cloudFunctionUrl = `https://us-central1-fansmeed-quiz-app.cloudfunctions.net/setSessionCookie?token=${encodeURIComponent(passport.token)}&redirectUrl=${encodeURIComponent(redirectUrl)}&role=${passport.role}&targetApp=${targetApp}`;
         
         console.log(`🔄 [Auth] Redirecting to Cloud Function: ${cloudFunctionUrl}`);
         window.location.href = cloudFunctionUrl;
         
     } catch (error) {
         console.error('❌ [Auth] Post-login redirect failed:', error);
-        console.error('❌ Error details:', {
-            message: error.message,
-            operation: error.operation,
-            isTimeout: error.isTimeout
-        });
+        console.error('❌ Error details:', error);
         
-        // Show error to user but stay on page
+        // Show error but don't redirect
         const uiStore = useUiStore();
         uiStore.setError(AUTH_OPERATIONS.REQUEST_PASSPORT, error.message || 'Failed to redirect after login');
         

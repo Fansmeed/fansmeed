@@ -10,6 +10,7 @@ if (!admin.apps.length) {
  */
 // In functions/issuePassport/index.js
 // Add better debugging:
+// In functions/issuePassport/index.js - UPDATED VERSION
 exports.issuePassport = onCall(
     {
         region: "us-central1",
@@ -22,13 +23,15 @@ exports.issuePassport = onCall(
         
         // Get Firebase Auth UID
         const uid = request.auth?.uid;
+        const email = request.auth?.token?.email;
+        
         if (!uid) {
             throw new HttpsError("unauthenticated", "Login required to issue passport.");
         }
 
         // Get target app from request data
         const { targetApp } = request.data;
-        console.log(`🎫 Target app: ${targetApp}, UID: ${uid}`);
+        console.log(`🎫 Target app: ${targetApp}, UID: ${uid}, Email: ${email}`);
         
         if (!targetApp || !["admin", "user"].includes(targetApp)) {
             throw new HttpsError("invalid-argument", "Invalid target app specified.");
@@ -38,83 +41,109 @@ exports.issuePassport = onCall(
             let userData = null;
             let collectionName = '';
             let role = '';
+            let userDocId = uid; // Default to uid
             
-            // Try to find user in both collections
             if (targetApp === "admin") {
-                // First check employees collection
-                const adminDoc = await admin.firestore().collection("employees").doc(uid).get();
+                // Try to find admin by UID first
+                const adminDocById = await admin.firestore().collection("employees").doc(uid).get();
                 
-                if (adminDoc.exists) {
-                    userData = adminDoc.data();
+                if (adminDocById.exists) {
+                    userData = adminDocById.data();
                     collectionName = "employees";
                     role = "admin";
+                    userDocId = uid;
+                    console.log(`✅ Admin found by UID: ${uid}`);
+                } 
+                // If not found by UID, try to find by email
+                else if (email) {
+                    console.log(`🔍 Admin not found by UID ${uid}, searching by email: ${email}`);
+                    const employeesRef = admin.firestore().collection("employees");
+                    const querySnapshot = await employeesRef.where('email', '==', email.toLowerCase()).limit(1).get();
                     
-                    // Check if admin is active
-                    if (userData.isActive === false) {
-                        throw new HttpsError("permission-denied", "Account disabled by administrator.");
-                    }
-                    
-                    console.log(`✅ ${uid} found in employees collection as admin`);
-                } else {
-                    // Admin not found in employees, check if they're a user trying to access admin
-                    const userDoc = await admin.firestore().collection("users").doc(uid).get();
-                    
-                    if (userDoc.exists) {
-                        console.log(`⚠️ ${uid} is a user, not an admin. Denying admin access.`);
-                        throw new HttpsError("permission-denied", "Access Denied: Not an Employee.");
+                    if (!querySnapshot.empty) {
+                        const doc = querySnapshot.docs[0];
+                        userData = doc.data();
+                        collectionName = "employees";
+                        role = "admin";
+                        userDocId = doc.id; // Use the actual document ID
+                        console.log(`✅ Admin found by email: ${email}, docId: ${userDocId}`);
                     } else {
-                        console.log(`❌ ${uid} not found in any collection`);
-                        throw new HttpsError("permission-denied", "Account not found in our system.");
+                        console.log(`❌ Admin not found by UID or email`);
+                        throw new HttpsError("permission-denied", "Access Denied: Not an Employee.");
                     }
+                } else {
+                    console.log(`❌ No UID or email available for admin lookup`);
+                    throw new HttpsError("permission-denied", "Access Denied: Not an Employee.");
+                }
+                
+                // Check if admin is active
+                if (userData.isActive === false) {
+                    throw new HttpsError("permission-denied", "Account disabled by administrator.");
                 }
                 
             } else {
-                // Check users collection
-                const userDoc = await admin.firestore().collection("users").doc(uid).get();
+                // USER SITE ACCESS
+                // Try to find user by UID first
+                const userDocById = await admin.firestore().collection("users").doc(uid).get();
                 
-                if (userDoc.exists) {
-                    userData = userDoc.data();
+                if (userDocById.exists) {
+                    userData = userDocById.data();
                     collectionName = "users";
                     role = "user";
+                    userDocId = uid;
+                    console.log(`✅ User found by UID: ${uid}`);
+                }
+                // If not found by UID, try to find by email
+                else if (email) {
+                    console.log(`🔍 User not found by UID ${uid}, searching by email: ${email}`);
+                    const usersRef = admin.firestore().collection("users");
+                    const querySnapshot = await usersRef.where('email', '==', email.toLowerCase()).limit(1).get();
                     
-                    // Check if user is active
-                    if (userData.isActive === false) {
-                        throw new HttpsError("permission-denied", "Account disabled.");
-                    }
-                    
-                    console.log(`✅ ${uid} found in users collection as user`);
-                } else {
-                    // User not found, check if they're an admin trying to access user site
-                    const adminDoc = await admin.firestore().collection("employees").doc(uid).get();
-                    
-                    if (adminDoc.exists) {
-                        console.log(`⚠️ ${uid} is an admin. Admins can access user site.`);
-                        userData = adminDoc.data();
-                        collectionName = "employees";
-                        role = "user"; // Allow admin to access user site
-                        
-                        if (userData.isActive === false) {
-                            throw new HttpsError("permission-denied", "Account disabled by administrator.");
-                        }
+                    if (!querySnapshot.empty) {
+                        const doc = querySnapshot.docs[0];
+                        userData = doc.data();
+                        collectionName = "users";
+                        role = "user";
+                        userDocId = doc.id; // Use the actual document ID
+                        console.log(`✅ User found by email: ${email}, docId: ${userDocId}`);
                     } else {
-                        console.log(`❌ ${uid} not found in any collection`);
-                        throw new HttpsError("permission-denied", "Account not found in our system.");
+                        // User not found, check if they're an admin trying to access user site
+                        console.log(`🔍 User not found, checking if admin...`);
+                        const adminDoc = await admin.firestore().collection("employees").doc(uid).get();
+                        
+                        if (adminDoc.exists) {
+                            userData = adminDoc.data();
+                            collectionName = "employees";
+                            role = "user"; // Allow admin to access user site
+                            userDocId = uid;
+                            console.log(`⚠️ Admin accessing user site: ${uid}`);
+                        } else {
+                            console.log(`❌ User not found by UID, email, or as admin`);
+                            throw new HttpsError("permission-denied", "Account not found in our system.");
+                        }
                     }
+                }
+                
+                // Check if user is active
+                if (userData.isActive === false) {
+                    throw new HttpsError("permission-denied", "Account disabled.");
                 }
             }
 
-            // Create custom token
+            // Create custom token with the CORRECT userDocId
             const customToken = await admin.auth().createCustomToken(uid, {
                 role: role,
                 email: userData.email || "",
-                collection: collectionName
+                collection: collectionName,
+                firestoreDocId: userDocId  // Add the actual Firestore document ID
             });
 
-            console.log(`✅ Passport issued for ${uid} with role: ${role}`);
+            console.log(`✅ Passport issued for ${uid} with role: ${role}, firestoreDocId: ${userDocId}`);
             
             return {
                 token: customToken,
                 role: role,
+                firestoreDocId: userDocId,
                 user: {
                     uid: uid,
                     email: userData.email || "",
@@ -124,6 +153,11 @@ exports.issuePassport = onCall(
 
         } catch (error) {
             console.error("❌ Error issuing passport:", error);
+            console.error("❌ Error details:", {
+                code: error.code,
+                message: error.message,
+                stack: error.stack
+            });
             
             if (error instanceof HttpsError) {
                 throw error;
