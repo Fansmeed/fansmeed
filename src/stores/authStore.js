@@ -786,52 +786,43 @@ export const useAuthStore = defineStore('auth', {
 async handlePostLoginRedirect() {
     try {
         console.log('🔄 [Auth] Handling post-login redirect...');
-        console.log('📍 Current user role:', this.userRole);
-        console.log('📍 Current user UID:', this.currentUser?.uid);
-        console.log('📍 Current user email:', this.currentUser?.email);
         
-        // FORCE ADMIN since we know user is admin
-        const targetApp = 'admin';
-        console.log(`🎯 [Auth] FORCED target app: ${targetApp} (user role: ${this.userRole})`);
+        // Get current user
+        const user = auth.currentUser;
+        if (!user) {
+            throw new Error('No authenticated user');
+        }
         
-        // Get the redirect URL from where the user came from
-        let redirectUrl = 'https://cp.fansmeed.com/';
+        // ✅ Get ID token directly from current user
+        const idToken = await user.getIdToken(true);
+        console.log('✅ ID token obtained');
         
-        // Check if we have a redirect in sessionStorage (from original redirect)
+        // Get user role from authStore
+        const role = this.userRole || 'user';
+        
+        // Get redirect URL
+        let redirectUrl = role === 'admin' ? 'https://cp.fansmeed.com/' : 'https://fansmeed.com/';
+        
+        // Check if we have a redirect in sessionStorage
         const storedRedirect = sessionStorage.getItem('loginRedirectUrl');
         if (storedRedirect) {
             redirectUrl = storedRedirect;
-            console.log(`🔗 Using stored redirect URL: ${redirectUrl}`);
             sessionStorage.removeItem('loginRedirectUrl');
-        } else {
-            console.log(`🔗 Using default admin redirect: ${redirectUrl}`);
         }
         
-                console.log(`🎫 [Auth] Requesting passport for admin...`);
-        const passport = await this.requestPassport(targetApp);
+        // Use user's UID as firestoreDocId
+        const firestoreDocId = user.uid;
         
-        if (!passport || !passport.token) {
-            throw new Error('Failed to obtain passport token');
-        }
-        
-        console.log('✅ [Auth] Passport obtained');
-        console.log('🎫 Passport role:', passport.role);
-        console.log('🎫 Firestore Doc ID:', passport.firestoreDocId); // Add this
-        
-        // Redirect to setSessionCookie WITH firestoreDocId
-        const cloudFunctionUrl = `https://us-central1-fansmeed-quiz-app.cloudfunctions.net/setSessionCookie?token=${encodeURIComponent(passport.token)}&redirectUrl=${encodeURIComponent(redirectUrl)}&role=${passport.role}&targetApp=${targetApp}&firestoreDocId=${encodeURIComponent(passport.firestoreDocId)}`;
+        // Redirect to setSessionCookie with ID token
+        const cloudFunctionUrl = `https://us-central1-fansmeed-quiz-app.cloudfunctions.net/setSessionCookie?token=${encodeURIComponent(idToken)}&redirectUrl=${encodeURIComponent(redirectUrl)}&role=${role}&firestoreDocId=${encodeURIComponent(firestoreDocId)}`;
         
         console.log(`🔄 [Auth] Redirecting to Cloud Function: ${cloudFunctionUrl}`);
         window.location.href = cloudFunctionUrl;
         
     } catch (error) {
         console.error('❌ [Auth] Post-login redirect failed:', error);
-        console.error('❌ Error details:', error);
-        
-        // Show error but don't redirect
         const uiStore = useUiStore();
         uiStore.setError(AUTH_OPERATIONS.REQUEST_PASSPORT, error.message || 'Failed to redirect after login');
-        
         return false;
     }
 },
