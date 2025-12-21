@@ -90,9 +90,9 @@ function buildCookieHeader(sessionToken, maxAge = SESSION_DURATION) {
         `${COOKIE_NAME}=${encodeURIComponent(sessionToken)}`,
         `Domain=.fansmeed.com`,  // Leading dot for all subdomains
         `Path=/`,
-        `HttpOnly`,
-        `Secure`,                 // Required for SameSite=None
-        `SameSite=None`,          // Required for cross-domain
+        `HttpOnly`,              // ✅ Prevent JS access (good for security)
+        `Secure`,                // ✅ HTTPS only
+        `SameSite=Lax`,          // ✅ Changed from None to Lax for same-domain
         `Max-Age=${maxAge}`
     ].join('; ');
 }
@@ -122,7 +122,7 @@ function buildClearCookieHeader() {
         `Path=/`,
         `HttpOnly`,
         `Secure`,
-        `SameSite=None`,
+        `SameSite=Lax`,
         `Max-Age=0`,
         `Expires=Thu, 01 Jan 1970 00:00:00 GMT`
     ].join('; ');

@@ -778,52 +778,58 @@ export const useAuthStore = defineStore('auth', {
             );
         },
 
-        /**
-         * NEW: Handle post-login redirect (common for all login methods)
-         */
-        // In authStore.js, update handlePostLoginRedirect:
-// In authStore.js, update handlePostLoginRedirect:
+
+/**
+ * Handle post-login redirect
+ */
 async handlePostLoginRedirect() {
     try {
-        console.log('🔄 [Auth] Handling post-login redirect...');
+        console.log('🔄 [Auth] Handling post-login redirect...')
         
-        // Get current user
-        const user = auth.currentUser;
+        const user = auth.currentUser
         if (!user) {
-            throw new Error('No authenticated user');
+            throw new Error('No authenticated user')
         }
         
-        // ✅ Get ID token directly from current user
-        const idToken = await user.getIdToken(true);
-        console.log('✅ ID token obtained');
+        // Get fresh ID token
+        const idToken = await user.getIdToken(true)
+        console.log('✅ ID token obtained')
         
-        // Get user role from authStore
-        const role = this.userRole || 'user';
+        // Determine user role
+        const role = this.userRole || 'user'
+        console.log(`👤 User role: ${role}`)
         
-        // Get redirect URL
-        let redirectUrl = role === 'admin' ? 'https://cp.fansmeed.com/' : 'https://fansmeed.com/';
+        // Get redirect URL from sessionStorage or use default
+        let redirectUrl = role === 'admin' 
+            ? 'https://cp.fansmeed.com/' 
+            : 'https://fansmeed.com/'
         
-        // Check if we have a redirect in sessionStorage
-        const storedRedirect = sessionStorage.getItem('loginRedirectUrl');
+        const storedRedirect = sessionStorage.getItem('loginRedirectUrl')
         if (storedRedirect) {
-            redirectUrl = storedRedirect;
-            sessionStorage.removeItem('loginRedirectUrl');
+            redirectUrl = storedRedirect
+            sessionStorage.removeItem('loginRedirectUrl')
         }
         
-        // Use user's UID as firestoreDocId
-        const firestoreDocId = user.uid;
+        // Build Cloud Function URL with ALL required parameters
+        const cloudFunctionUrl = `${ENV.functions.setSessionCookie}?token=${encodeURIComponent(idToken)}&redirectUrl=${encodeURIComponent(redirectUrl)}&role=${role}`
         
-        // Redirect to setSessionCookie with ID token
-        const cloudFunctionUrl = `https://us-central1-fansmeed-quiz-app.cloudfunctions.net/setSessionCookie?token=${encodeURIComponent(idToken)}&redirectUrl=${encodeURIComponent(redirectUrl)}&role=${role}&firestoreDocId=${encodeURIComponent(firestoreDocId)}`;
+        console.log(`🔄 [Auth] Redirecting to Cloud Function: ${cloudFunctionUrl}`)
         
-        console.log(`🔄 [Auth] Redirecting to Cloud Function: ${cloudFunctionUrl}`);
-        window.location.href = cloudFunctionUrl;
+        // Clear any local auth data
+        this.cleanup()
+        
+        // Redirect immediately (don't wait)
+        window.location.href = cloudFunctionUrl
         
     } catch (error) {
-        console.error('❌ [Auth] Post-login redirect failed:', error);
-        const uiStore = useUiStore();
-        uiStore.setError(AUTH_OPERATIONS.REQUEST_PASSPORT, error.message || 'Failed to redirect after login');
-        return false;
+        console.error('❌ [Auth] Post-login redirect failed:', error)
+        const uiStore = useUiStore()
+        uiStore.setError(AUTH_OPERATIONS.REQUEST_PASSPORT, error.message || 'Failed to redirect after login')
+        
+        // Fallback: redirect to main site
+        setTimeout(() => {
+            window.location.href = 'https://fansmeed.com'
+        }, 2000)
     }
 },
 

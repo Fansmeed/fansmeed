@@ -7,25 +7,38 @@ const { validateSessionForClient } = require("./sessionValidator");
 exports.verifySessionHttp = onRequest(
     {
         region: "us-central1",
-        cors: true,
+        cors: false, // We will handle CORS manually for better control
     },
     async (req, res) => {
-        console.log("🔐 HTTP Session verification endpoint called");
+        const allowedOrigins = [
+            "https://cp.fansmeed.com", 
+            "https://fansmeed.com",
+            "http://localhost:3000", // For local dev
+            "http://localhost:3001"
+        ];
 
-        // Handle CORS
-        res.set("Access-Control-Allow-Origin", ["https://cp.fansmeed.com", "https://fansmeed.com"]);
+        const origin = req.headers.origin;
+
+        // 1. Dynamic Origin Check
+        if (allowedOrigins.includes(origin)) {
+            res.set("Access-Control-Allow-Origin", origin);
+        }
+        
+        // 2. Mandatory Headers for Cookies
+        res.set("Access-Control-Allow-Credentials", "true");
         res.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
         res.set("Access-Control-Allow-Headers", "Content-Type, Cookie");
-        res.set("Access-Control-Allow-Credentials", "true");
 
+        // 3. Handle Preflight
         if (req.method === "OPTIONS") {
-            res.status(204).send("");
-            return;
+            return res.status(204).send("");
         }
 
         try {
-            // Get session token from cookie or query param
             let sessionToken;
+
+            // Log headers to debug in Firebase console if cookie is missing
+            console.log("Headers received:", req.headers);
 
             if (req.headers.cookie) {
                 const cookieMatch = req.headers.cookie.match(/auth_session=([^;]+)/);
@@ -34,45 +47,23 @@ exports.verifySessionHttp = onRequest(
                 }
             }
 
-            if (!sessionToken && req.query.token) {
-                sessionToken = req.query.token;
-            }
-
             if (!sessionToken) {
-                return res.status(401).json({
-                    success: false,
-                    authenticated: false,
-                    error: "NO_SESSION_TOKEN"
-                });
+                return res.status(401).json({ authenticated: false, error: "MISSING_COOKIE" });
             }
 
             const sessionData = await validateSessionForClient(sessionToken);
-
             if (!sessionData) {
-                return res.status(401).json({
-                    success: false,
-                    authenticated: false,
-                    error: "INVALID_SESSION"
-                });
+                return res.status(401).json({ authenticated: false, error: "INVALID_SESSION" });
             }
 
             return res.status(200).json({
                 success: true,
                 authenticated: true,
-                user: {
-                    uid: sessionData.userId,
-                    role: sessionData.role,
-                    sessionAge: Date.now() - sessionData.timestamp
-                }
+                user: { uid: sessionData.userId, role: sessionData.role }
             });
 
         } catch (error) {
-            console.error("❌ Session verification failed:", error);
-            return res.status(500).json({
-                success: false,
-                authenticated: false,
-                error: "SERVER_ERROR"
-            });
+            return res.status(500).json({ error: "INTERNAL_ERROR" });
         }
     }
 );
