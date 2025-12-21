@@ -807,7 +807,7 @@ async handlePostLoginRedirect() {
             console.log(`🔗 Using default admin redirect: ${redirectUrl}`);
         }
         
-        console.log(`🎫 [Auth] Requesting passport for ${targetApp}...`);
+                console.log(`🎫 [Auth] Requesting passport for admin...`);
         const passport = await this.requestPassport(targetApp);
         
         if (!passport || !passport.token) {
@@ -816,17 +816,10 @@ async handlePostLoginRedirect() {
         
         console.log('✅ [Auth] Passport obtained');
         console.log('🎫 Passport role:', passport.role);
-        console.log('🎫 Passport targetApp:', passport.targetApp);
+        console.log('🎫 Firestore Doc ID:', passport.firestoreDocId); // Add this
         
-        // Ensure we're redirecting to admin site
-        if (passport.role === 'admin' && redirectUrl.includes('fansmeed.com') && !redirectUrl.includes('cp.')) {
-            // Fix redirect URL to admin site
-            redirectUrl = redirectUrl.replace('fansmeed.com', 'cp.fansmeed.com');
-            console.log(`🔧 Fixed redirect URL to admin site: ${redirectUrl}`);
-        }
-        
-        // Redirect to setSessionCookie
-        const cloudFunctionUrl = `https://us-central1-fansmeed-quiz-app.cloudfunctions.net/setSessionCookie?token=${encodeURIComponent(passport.token)}&redirectUrl=${encodeURIComponent(redirectUrl)}&role=${passport.role}&targetApp=${targetApp}`;
+        // Redirect to setSessionCookie WITH firestoreDocId
+        const cloudFunctionUrl = `https://us-central1-fansmeed-quiz-app.cloudfunctions.net/setSessionCookie?token=${encodeURIComponent(passport.token)}&redirectUrl=${encodeURIComponent(redirectUrl)}&role=${passport.role}&targetApp=${targetApp}&firestoreDocId=${encodeURIComponent(passport.firestoreDocId)}`;
         
         console.log(`🔄 [Auth] Redirecting to Cloud Function: ${cloudFunctionUrl}`);
         window.location.href = cloudFunctionUrl;

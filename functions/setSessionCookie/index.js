@@ -3,16 +3,19 @@ const { onRequest } = require("firebase-functions/v2/https");
 const admin = require("firebase-admin");
 const {
     generateSessionToken,
+    validateSessionToken,  // ✅ Add this import
     getUserRole,
     buildCookieHeader,
     buildClearCookieHeader,
-} = require("./sessionManager");
+} = require("./sessionManager");  // ✅ Make sure this path is correct
+
 
 if (!admin.apps.length) {
     admin.initializeApp();
 }
 
 // In functions/setSessionCookie/index.js
+// In setSessionCookie/index.js, update the main function:
 exports.setSessionCookie = onRequest(
     {
         region: "us-central1",
@@ -34,7 +37,7 @@ exports.setSessionCookie = onRequest(
 
         try {
             // Get parameters from query
-            const sessionToken = req.query.token; // Now a session token, not Firebase token
+            const jwtToken = req.query.token; // This is a Firebase JWT token
             const redirectUrl = req.query.redirectUrl;
             const userRole = req.query.role;
             const firestoreDocId = req.query.firestoreDocId || req.query.userId;
@@ -43,37 +46,39 @@ exports.setSessionCookie = onRequest(
             console.log("🎭 Role from query:", userRole);
             console.log("📄 Firestore Doc ID:", firestoreDocId);
 
-            if (!sessionToken) {
-                console.error("❌ No session token provided");
+            if (!jwtToken) {
+                console.error("❌ No token provided");
                 res.setHeader("Set-Cookie", buildClearCookieHeader());
                 res.redirect(302, "https://auth.fansmeed.com/auth/login?error=no_token");
                 return;
             }
 
-            // Validate the session token
-            const sessionData = validateSessionToken(sessionToken);
+            // Validate the Firebase JWT token
+            const decodedToken = await admin.auth().verifyIdToken(jwtToken);
             
-            if (!sessionData) {
-                console.error("❌ Invalid session token");
+            if (!decodedToken) {
+                console.error("❌ Invalid Firebase token");
                 res.setHeader("Set-Cookie", buildClearCookieHeader());
                 res.redirect(302, "https://auth.fansmeed.com/auth/login?error=invalid_token");
                 return;
             }
 
-            console.log("✅ Session token validated:", sessionData);
+            console.log("✅ Firebase token validated:", decodedToken.uid);
             
-            // Use the data from the session token
-            const userId = sessionData.userId;
-            const role = sessionData.role || userRole;
+            // Use the data from the decoded token
+            const userId = decodedToken.uid;
+            const role = decodedToken.claims?.role || userRole;
+            const firestoreDocIdFromToken = decodedToken.claims?.firestoreDocId || userId;
             
             console.log("👤 User ID from token:", userId);
             console.log("🎭 Role from token:", role);
+            console.log("📄 Firestore Doc ID from token:", firestoreDocIdFromToken);
 
-            // Generate final session token for cookie
-            const finalSessionToken = generateSessionToken(userId, role);
+            // Generate session token for cookie
+            const sessionToken = generateSessionToken(userId, role);
             
             console.log("🍪 Building cookie header...");
-            const cookieHeader = buildCookieHeader(finalSessionToken);
+            const cookieHeader = buildCookieHeader(sessionToken);
             console.log("🍪 Cookie header to set:", cookieHeader);
 
             // Validate redirect URL
@@ -126,7 +131,7 @@ exports.setSessionCookie = onRequest(
             // Add debug headers
             res.set("X-Auth-User", userId);
             res.set("X-Auth-Role", role);
-            res.set("X-Firestore-DocId", firestoreDocId || userId);
+            res.set("X-Firestore-DocId", firestoreDocIdFromToken);
             res.set("X-Cookie-Set", "true");
             res.set("X-Redirect-To", finalRedirectUrl);
 
@@ -150,10 +155,10 @@ exports.setSessionCookie = onRequest(
             // Determine error message
             let errorMessage = "authentication_failed";
             
-            if (error.message.includes("Invalid session token")) {
+            if (error.message.includes("Firebase ID token has expired")) {
+                errorMessage = "token_expired";
+            } else if (error.message.includes("invalid signature") || error.message.includes("invalid token")) {
                 errorMessage = "invalid_token";
-            } else if (error.message.includes("timeout")) {
-                errorMessage = "timeout";
             } else if (error.message.includes("Account not found")) {
                 errorMessage = "account_not_found";
             }
