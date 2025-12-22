@@ -50,8 +50,8 @@ onMounted(async () => {
     // Initialize theme
     themeStore.initializeTheme()
     
-    // Initialize auth (but don't block rendering)
-    authStore.initialize().catch(error => {
+    // Initialize auth
+    await authStore.initialize().catch(error => {
         console.error('Auth initialization error:', error)
     })
 })
@@ -76,24 +76,5 @@ onMounted(async () => {
 
 .full-height {
     height: 100vh;
-}
-</style>
-
-
-<style lang="scss">
-@use './assets/css/global.scss';
-
-.app-case {
-    display: flex;
-    flex-direction: column;
-    min-height: 100dvh;
-}
-
-.app {
-    flex: 1;
-    overflow: auto;
-    position: relative;
-    margin-top: 0;
-    min-height: 100dvh;
 }
 </style>

@@ -1,5 +1,5 @@
 // Location: auth.fansmeed.com/src/utils/subdomainDetector.js
-import { ENV, getMyType } from '@/config'
+import { ENV } from '@/config'
 
 /**
  * Detect user type based on URL parameters or referrer
@@ -29,14 +29,16 @@ export function detectLoginType() {
             
             console.log('🔍 Referrer hostname:', hostname);
             
-            // Check against ENV config for both local and production
-            if (hostname === ENV.apps.admin.replace('http://', '').replace('https://', '').split('/')[0] ||
-                hostname.includes('cp.')) {
+            // Check against ENV config
+            const adminDomain = ENV.apps.admin.replace('http://', '').replace('https://', '').split('/')[0];
+            const userDomain = ENV.apps.user.replace('http://', '').replace('https://', '').split('/')[0];
+            
+            if (hostname === adminDomain || hostname.includes('cp.')) {
                 console.log('✅ Login type from referrer: admin');
                 return 'admin';
             }
             
-            if (hostname === ENV.apps.user.replace('http://', '').replace('https://', '').split('/')[0]) {
+            if (hostname === userDomain) {
                 console.log('✅ Login type from referrer: user');
                 return 'user';
             }
@@ -45,13 +47,13 @@ export function detectLoginType() {
         }
     }
     
-    // 3. No referrer or type param - direct access to auth hub
+    // 3. No referrer or type param
     console.log('⚠️ Direct access to auth domain - type unknown');
     return 'unknown';
 }
 
 /**
- * Get target domain based on user type - USING ENV CONFIG
+ * Get target domain based on user type
  */
 export function getTargetDomain(userType) {
     if (userType === 'admin') return ENV.apps.admin;
@@ -59,42 +61,7 @@ export function getTargetDomain(userType) {
 }
 
 /**
- * Build redirect URL after auth - USING ENV CONFIG
- */
-// In subdomainDetector.js, update buildRedirectUrl:
-export function buildRedirectUrl(userType, redirectParam = null) {
-    // If we have a redirect param, use it
-    if (redirectParam) {
-        console.log(`🔗 Using provided redirect URL: ${redirectParam}`);
-        return redirectParam;
-    }
-    
-    // Otherwise build based on userType and environment
-    let redirectUrl;
-    
-    if (window.location.hostname === 'localhost') {
-        // Local development
-        if (userType === 'admin') {
-            redirectUrl = 'http://localhost:3000/';
-        } else {
-            redirectUrl = 'http://localhost:3001/';
-        }
-        console.log(`🔗 Built localhost redirect for ${userType}: ${redirectUrl}`);
-    } else {
-        // Production
-        if (userType === 'admin') {
-            redirectUrl = 'https://cp.fansmeed.com/';
-        } else {
-            redirectUrl = 'https://fansmeed.com/';
-        }
-        console.log(`🔗 Built production redirect for ${userType}: ${redirectUrl}`);
-    }
-    
-    return redirectUrl;
-}
-
-/**
- * Get redirect URL from query params with fallback
+ * Get redirect URL from query params
  */
 export function getRedirectUrlFromParams() {
     const urlParams = new URLSearchParams(window.location.search);
@@ -119,7 +86,6 @@ export function getRedirectUrlFromParams() {
         }
     }
     
-    // Default to home page
     console.log('✅ Using default redirect URL');
     return null;
 }

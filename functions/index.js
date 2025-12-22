@@ -9,8 +9,13 @@ setGlobalOptions({
 
 const issuePassport = require("./issuePassport/index");
 const setSessionCookie = require("./setSessionCookie/index");
-const verifySession = require("./verifySession/index"); // This should be the Firebase session cookie version
+const verifySession = require("./verifySession/index");
+const exchangeToken = require("./exchangeToken/index");
 
 exports.issuePassport = issuePassport.issuePassport;
 exports.setSessionCookie = setSessionCookie.setSessionCookie;
-exports.verifySessionHttp = verifySession.verifySessionHttp; // Keep same name for backward compatibility
+exports.verifySessionHttp = verifySession.verifySessionHttp;
+exports.exchangeToken = exchangeToken.exchangeToken;
+
+// Additional helper function for logout
+exports.clearSession = require("./clearSession/index").clearSession;

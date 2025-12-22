@@ -1,15 +1,20 @@
 // functions/setSessionCookie/index.js
 const { onRequest } = require("firebase-functions/v2/https");
 const admin = require("firebase-admin");
+const { 
+    generateSessionToken, 
+    buildCookieHeader,
+    buildClearCookieHeader 
+} = require("./sessionManager");
 
 if (!admin.apps.length) {
     admin.initializeApp();
 }
 
-// Session duration: 5 days in SECONDS (not milliseconds)
-const SESSION_DURATION_SECONDS = 60 * 60 * 24 * 5; // 5 days in seconds
-const SESSION_DURATION_MS = SESSION_DURATION_SECONDS * 1000; // 5 days in milliseconds
-
+/**
+ * This function is for legacy support or alternative flows
+ * The main flow now uses direct token handoff
+ */
 exports.setSessionCookie = onRequest(
     {
         region: "us-central1",
@@ -19,137 +24,112 @@ exports.setSessionCookie = onRequest(
         memory: "256MiB",
     },
     async (req, res) => {
-        console.log("🎯 Setting Firebase Session Cookie");
+        console.log("🎯 [Legacy] Setting session cookie");
         
-        // Handle CORS preflight
+        // Handle OPTIONS preflight
         if (req.method === "OPTIONS") {
-            res.set("Access-Control-Allow-Origin", ["https://auth.fansmeed.com", "https://cp.fansmeed.com", "https://fansmeed.com"]);
+            res.set("Access-Control-Allow-Origin", "*");
+            res.set("Access-Control-Allow-Methods", "GET, POST");
+            res.set("Access-Control-Allow-Headers", "Content-Type");
             res.set("Access-Control-Allow-Credentials", "true");
-            res.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-            res.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
             res.status(204).send("");
             return;
         }
 
         try {
-            // Get token from query
-            const idToken = req.query.token;
+            // Get parameters
+            const jwtToken = req.query.token;
             const redirectUrl = req.query.redirectUrl;
-            const role = req.query.role || "user";
+            const userRole = req.query.role;
             const firestoreDocId = req.query.firestoreDocId;
 
-            console.log("📨 Token received:", idToken ? "Yes" : "No");
-            console.log("🔗 Redirect URL:", redirectUrl);
-            console.log("🎭 Role:", role);
-            console.log("📄 Firestore Doc ID:", firestoreDocId);
-
-            if (!idToken) {
-                throw new Error("No ID token provided");
-            }
-
-            // Verify the ID token
-            const decodedToken = await admin.auth().verifyIdToken(idToken);
-            console.log("✅ ID Token verified for UID:", decodedToken.uid);
-            console.log("📧 User email:", decodedToken.email);
-
-            // Create a Firebase session cookie
-            const sessionCookie = await admin.auth().createSessionCookie(idToken, {
-                expiresIn: SESSION_DURATION_SECONDS,
+            console.log("🔗 Processing request:", { 
+                hasToken: !!jwtToken, 
+                redirectUrl, 
+                role: userRole 
             });
 
-            // Determine correct redirect URL
+            if (!jwtToken) {
+                console.error("❌ No token provided");
+                res.setHeader("Set-Cookie", buildClearCookieHeader());
+                res.redirect(302, "https://auth.fansmeed.com/auth/login?error=no_token");
+                return;
+            }
+
+            // Verify the Firebase ID token
+            const decodedToken = await admin.auth().verifyIdToken(jwtToken);
+            
+            if (!decodedToken) {
+                console.error("❌ Invalid Firebase token");
+                res.setHeader("Set-Cookie", buildClearCookieHeader());
+                res.redirect(302, "https://auth.fansmeed.com/auth/login?error=invalid_token");
+                return;
+            }
+
+            console.log("✅ Firebase token validated:", decodedToken.uid);
+            
+            // Generate session token for cookie (legacy approach)
+            const sessionToken = generateSessionToken(
+                decodedToken.uid, 
+                userRole || decodedToken.role || 'user'
+            );
+            
+            // Build cookie header
+            const cookieHeader = buildCookieHeader(sessionToken);
+            
+            // Set response headers
+            res.set("Access-Control-Allow-Origin", "*");
+            res.set("Access-Control-Allow-Credentials", "true");
+            res.setHeader("Set-Cookie", cookieHeader);
+            
+            // Determine redirect URL
             let finalRedirectUrl = redirectUrl;
-            if (!finalRedirectUrl || !isValidRedirectUrl(finalRedirectUrl)) {
-                finalRedirectUrl = role === "admin" 
+            if (finalRedirectUrl) {
+                try {
+                    const url = new URL(finalRedirectUrl);
+                    const allowedDomains = ["cp.fansmeed.com", "fansmeed.com"];
+                    const hostname = url.hostname;
+                    
+                    if (!allowedDomains.some(domain => 
+                        hostname === domain || hostname.endsWith(`.${domain}`)
+                    )) {
+                        finalRedirectUrl = null;
+                    }
+                } catch (error) {
+                    console.warn("⚠️ Invalid redirect URL:", error.message);
+                    finalRedirectUrl = null;
+                }
+            }
+
+            // Set default redirect
+            if (!finalRedirectUrl) {
+                finalRedirectUrl = (userRole === "admin")
                     ? "https://cp.fansmeed.com/"
                     : "https://fansmeed.com/";
             }
 
-            console.log("🍪 Creating session cookies...");
-            
-            // Set Firebase's __session cookie (HttpOnly for security)
-            res.cookie("__session", sessionCookie, {
-                maxAge: SESSION_DURATION_MS,
-                httpOnly: true,
-                secure: true,
-                domain: ".fansmeed.com",
-                sameSite: "lax",
-                path: "/",
-            });
-            
-            // Also set a custom cookie for your app (non-HttpOnly for client access)
-            res.cookie("auth_session", sessionCookie, {
-                maxAge: SESSION_DURATION_MS,
-                httpOnly: false, // Allow JavaScript access
-                secure: true,
-                domain: ".fansmeed.com",
-                sameSite: "lax",
-                path: "/",
-            });
+            console.log(`✅ Cookie set, redirecting to: ${finalRedirectUrl}`);
 
-            // Set CORS headers
-            res.set("Access-Control-Allow-Origin", finalRedirectUrl.includes("localhost") 
-                ? "http://localhost:3000" 
-                : "https://" + new URL(finalRedirectUrl).hostname);
-            res.set("Access-Control-Allow-Credentials", "true");
-
-            // Set debug headers
+            // Add debug headers for development
             res.set("X-Auth-User", decodedToken.uid);
-            res.set("X-Auth-Role", role);
-            res.set("X-Session-Set", "true");
-            res.set("X-Firestore-DocId", firestoreDocId || decodedToken.uid);
+            res.set("X-Auth-Role", userRole || 'user');
+            res.set("X-Cookie-Set", "true");
 
-            console.log(`✅ Session cookies set for ${decodedToken.uid}`);
-            console.log(`🔄 Redirecting to: ${finalRedirectUrl}`);
-
-            // Redirect to target site
+            // Redirect
             res.redirect(302, finalRedirectUrl);
 
         } catch (error) {
-            console.error("❌ Error setting session cookie:", error.message);
-            console.error("Stack:", error.stack);
+            console.error("❌ Error in setSessionCookie:", error.message);
 
-            // Clear any existing cookies
-            res.clearCookie("__session", {
-                domain: ".fansmeed.com",
-                path: "/",
-                secure: true,
-                httpOnly: true,
-                sameSite: "lax"
-            });
-            res.clearCookie("auth_session", {
-                domain: ".fansmeed.com",
-                path: "/",
-                secure: true,
-                httpOnly: false,
-                sameSite: "lax"
-            });
-
-            // Set error headers
+            // Set CORS headers
             res.set("Access-Control-Allow-Origin", "*");
             res.set("Access-Control-Allow-Credentials", "true");
 
-            // Determine error type
-            let errorType = "auth_failed";
-            if (error.message.includes("expired")) errorType = "token_expired";
-            if (error.message.includes("invalid signature")) errorType = "invalid_token";
+            // Clear cookie on error
+            res.setHeader("Set-Cookie", buildClearCookieHeader());
 
-            // Redirect to auth hub with error
-            res.redirect(302, `https://auth.fansmeed.com/auth/login?error=${errorType}`);
+            // Redirect to auth with error
+            res.redirect(302, "https://auth.fansmeed.com/auth/login?error=session_failed");
         }
     }
 );
-
-// Helper function to validate redirect URLs
-function isValidRedirectUrl(url) {
-    try {
-        const urlObj = new URL(url);
-        const allowedDomains = ["cp.fansmeed.com", "fansmeed.com", "localhost"];
-        return allowedDomains.some(domain => 
-            urlObj.hostname === domain || 
-            urlObj.hostname.endsWith(`.${domain}`)
-        );
-    } catch (error) {
-        return false;
-    }
-}

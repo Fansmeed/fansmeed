@@ -1,9 +1,8 @@
 <!-- Location: auth.fansmeed.com/src/views/CompleteSignIn.vue -->
 <template>
     <div class="min-h-screen flex flex-col lg:flex-row">
-        <!-- Left side background (keep your existing layout) -->
-        <div
-            class="account-head lg:w-[500px] lg:min-h-screen lg:fixed lg:top-0 lg:left-0 h-70 lg:h-screen relative overflow-hidden">
+        <!-- Left side background -->
+        <div class="account-head lg:w-[500px] lg:min-h-screen lg:fixed lg:top-0 lg:left-0 h-70 lg:h-screen relative overflow-hidden">
             <img :src="randomImage" alt="Login Background" class="absolute inset-0 w-full h-full object-cover" />
             <div class="absolute inset-0 bg-black/70 backdrop-blur-sm"></div>
             <div class="relative z-10 h-full flex items-center justify-center p-8">
@@ -35,8 +34,9 @@
                     <div class="p-4 bg-red-100 dark:bg-red-900/20 mb-4 rounded-full flex">
                         <i class="pi pi-exclamation-triangle text-4xl text-red-600 dark:text-red-400"></i>
                     </div>
-                    <h3 class="text-xl font-bold text-neutral-700 dark:text-neutral-300 mb-2">Error Encountered while
-                        signing in</h3>
+                    <h3 class="text-xl font-bold text-neutral-700 dark:text-neutral-300 mb-2">
+                        Error Encountered while signing in
+                    </h3>
                     <p class="text-neutral-500 dark:text-neutral-400">
                         {{ formatErrorForDisplay(uiStore.getError(AUTH_OPERATIONS.COMPLETE_SIGN_IN)) }}
                     </p>
@@ -53,44 +53,48 @@
                     <div class="p-4 bg-green-100 dark:bg-green-900/20 mb-4 rounded-full flex">
                         <i class="pi pi-check-circle text-4xl text-green-600 dark:text-green-400"></i>
                     </div>
-                    <h3 class="text-xl font-bold text-neutral-700 dark:text-neutral-300 mb-2">Sign-in Successful!</h3>
+                    <h3 class="text-xl font-bold text-neutral-700 dark:text-neutral-300 mb-2">
+                        Sign-in Successful!
+                    </h3>
                     <p class="text-neutral-500 dark:text-neutral-400">
                         Redirecting you to the application...
                     </p>
-                    <div v-if="redirectInfo" class="mt-4 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
-                        <p class="text-sm text-blue-600 dark:text-blue-400">
-                            Redirecting to: {{ redirectInfo.domain }}
-                        </p>
-                        <p class="text-xs text-blue-500 dark:text-blue-300 mt-1">
-                            Using POST method for secure cookie setting
-                        </p>
-                    </div>
+                    <ProgressSpinner v-if="!redirected" style="width: 30px; height: 30px" class="mt-4" />
                 </div>
             </div>
         </div>
     </div>
 </template>
 
-<!-- Location: auth.fansmeed.com/src/views/CompleteSignIn.vue -->
 <script setup>
 import { ref, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
 import { useAuthStore, AUTH_OPERATIONS } from '@/stores/authStore'
 import { useUiStore } from '@/stores/uiStore'
-import { buildRedirectUrl, getRedirectUrlFromParams } from '@/utils/subdomainDetector'
 import ProgressSpinner from 'primevue/progressspinner'
 import Button from 'primevue/button'
 
-const router = useRouter()
 const authStore = useAuthStore()
 const uiStore = useUiStore()
 const signInSuccess = ref(false)
-const redirectInfo = ref(null)
+const redirected = ref(false)
+
+// Random background images
+const images = [
+    'https://lh3.googleusercontent.com/aida-public/AB6AXuDoQNwBVEvy0ww5JGRPoYshfGDaxkFgUzrCI4wOcmqWT_BJeoDW-LXdiHj4VF01-UREo6WyAp_dl6UZpizqwJ1m_Xhvj9wxl3dvN-xn_htfgs67iixvGPJoxt04r7kk7mFxzbnxmKNKVtrHpqmSxELTN_J9PRh0TFErf8CyekCCYEwVgK47H2kNSehWs5bOURHQl1KVDyLvYXYBPW6gMKnNS_6Dks0zrW75p_IBqXVb7kluPTpC5mfONvwd6teoTywBpeiue6Y2u_dR',
+    'https://lh3.googleusercontent.com/aida-public/AB6AXuA2XJy7JRPHkDV4YDiJt6drHq9HnNfLw08zlPrCZV9hf4VaNERVG2zr63VsYgVqAOKDowJWxaEfkFLV1YWxpSIIHc0vaGBHCPUhHzChx-pdxBMZLwAzWlL1OeIVEkLRJOHLs2NU90O-hees9lCWF1t-VcERyd0-1XcB1GIzEj5I3eYcsO_ZEQMywhnsyitjp7pjKWx6JIdZqUTAD82hdBnn9nJ8D6OW-c4mguQ_AFrJzEp-O0K8EQ9Bc4JeJsdtZbqTxoiW'
+]
+
+const randomImage = ref('')
 
 const formatErrorForDisplay = (error) => {
     if (typeof error === 'string') return error
     if (error?.message) return error.message
     return 'An unknown error occurred'
+}
+
+const getRandomImage = () => {
+    const randomIndex = Math.floor(Math.random() * images.length)
+    randomImage.value = images[randomIndex]
 }
 
 const handleSignIn = async () => {
@@ -104,44 +108,19 @@ const handleSignIn = async () => {
             throw new Error('No user data received')
         }
 
-        // Get fresh ID token
-        const idToken = await user.getIdToken(true)
-        console.log('✅ ID token obtained')
-
-        // Determine user role from authStore
-        const userRole = authStore.userRole || 'user'
-        console.log(`👤 User role: ${userRole}`)
-        
-        // Get redirect URL from params or use default
-        const redirectParam = getRedirectUrlFromParams()
-        console.log('🔗 Redirect param:', redirectParam)
-        
-        // Build secure redirect URL
-        const redirectUrl = buildRedirectUrl(userRole, redirectParam)
-        
         console.log('✅ Sign-in successful')
-        console.log('👤 User role:', userRole)
-        console.log('🔗 Redirect to:', redirectUrl)
-
-        // Show success state
         signInSuccess.value = true
         
-        // Store token in sessionStorage temporarily
-        sessionStorage.setItem('auth_token', idToken)
-        sessionStorage.setItem('auth_redirect', redirectUrl)
-        sessionStorage.setItem('auth_role', userRole)
-
-        // Redirect to our redirect page which will handle the Cloud Function call
+        // The authStore's onAuthStateChanged listener will handle the redirect
+        // Wait a moment for the redirect to happen
         setTimeout(() => {
-            router.push({
-                path: '/auth/redirect',
-                query: {
-                    token: idToken,
-                    redirectUrl: redirectUrl,
-                    role: userRole
-                }
-            })
-        }, 1500)
+            if (!redirected.value) {
+                console.log('🔄 Manual redirect triggered')
+                authStore.handlePostLoginRedirect().catch(() => {
+                    window.location.href = '/auth/login'
+                })
+            }
+        }, 2000)
 
     } catch (error) {
         console.error('❌ Sign-in error:', error)
@@ -150,6 +129,7 @@ const handleSignIn = async () => {
 }
 
 onMounted(() => {
+    getRandomImage()
     handleSignIn()
 })
 </script>

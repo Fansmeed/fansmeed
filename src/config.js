@@ -1,12 +1,11 @@
-// Location: ALL SITES/src/config.js
-// Environment-aware configuration - USING YOUR PORTS
+// Location: auth.fansmeed.com/src/config.js
 const isLocal = window.location.hostname === 'localhost';
 
 export const ENV = {
     // Auth Hub URL
     authHub: isLocal ? 'http://localhost:3002' : 'https://auth.fansmeed.com',
 
-    // App URLs - USING YOUR PORTS
+    // App URLs
     apps: {
         admin: isLocal ? 'http://localhost:3000' : 'https://cp.fansmeed.com',
         user: isLocal ? 'http://localhost:3001' : 'https://fansmeed.com'
@@ -16,20 +15,20 @@ export const ENV = {
     functions: {
         issuePassport: 'https://us-central1-fansmeed-quiz-app.cloudfunctions.net/issuePassport',
         setSessionCookie: 'https://us-central1-fansmeed-quiz-app.cloudfunctions.net/setSessionCookie',
-        verifySession: 'https://us-central1-fansmeed-quiz-app.cloudfunctions.net/verifySessionHttp'
+        verifySession: 'https://us-central1-fansmeed-quiz-app.cloudfunctions.net/verifySessionHttp',
+        exchangeToken: 'https://us-central1-fansmeed-quiz-app.cloudfunctions.net/exchangeToken'
     }
 };
 
-// Helper to identify which site we're on - USING YOUR PORTS
+// Helper to identify which site we're on
 export const getMyType = () => {
     const hostname = window.location.hostname;
 
     if (isLocal) {
-        // Local development - USING YOUR PORTS
         const port = window.location.port;
         if (port === '3000') return 'admin';
         if (port === '3001') return 'user';
-        return 'auth'; // auth hub (port 3002)
+        return 'auth';
     }
 
     // Production
@@ -54,14 +53,26 @@ export const getCurrentAppUrl = () => {
 // Check if we're on the auth hub
 export const isAuthHub = () => getMyType() === 'auth';
 
-// Check if we're on an admin site
-export const isAdminSite = () => getMyType() === 'admin';
-
-// Check if we're on a user site
-export const isUserSite = () => getMyType() === 'user';
-
 // Build redirect URL with proper environment
 export const buildRedirectUrl = (type, path = '/') => {
     const baseUrl = getAppUrl(type);
     return `${baseUrl}${path.startsWith('/') ? path : '/' + path}`;
+};
+
+// Build auth redirect URL with token (Passport Handoff)
+export const buildAuthRedirectWithToken = (type, token, role, redirectPath = '/') => {
+    const baseUrl = getAppUrl(type);
+    const url = new URL(baseUrl);
+    
+    // Add token and role as query parameters
+    url.searchParams.set('token', token);
+    url.searchParams.set('role', role);
+    url.searchParams.set('source', 'auth_hub');
+    
+    // Add redirect path if not root
+    if (redirectPath && redirectPath !== '/') {
+        url.pathname = redirectPath;
+    }
+    
+    return url.toString();
 };

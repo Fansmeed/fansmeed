@@ -25,7 +25,7 @@ const router = createRouter({
             meta: {
                 title: "Login",
                 hideNavigation: true,
-                requiresAuthContext: true // ✅ Needs type parameter or referrer
+                requiresAuthContext: true
             }
         },
         {
@@ -69,16 +69,6 @@ const router = createRouter({
             }
         },
         {
-    path: '/auth/redirect',
-    name: 'AuthRedirect',
-    component: () => import('@/views/AuthRedirect.vue'),
-    meta: {
-        title: "Redirecting",
-        hideNavigation: true,
-        public: true
-    }
-},
-        {
             path: '/:pathMatch(.*)*',
             name: 'NotFound',
             component: () => import('@/components/NotFound.vue'),
@@ -107,18 +97,16 @@ function setDocumentTitle(to) {
 }
 
 /**
- * Check if URL has required auth context (type parameter)
+ * Check if URL has required auth context
  */
 function hasAuthContext() {
     const urlParams = new URLSearchParams(window.location.search)
     const typeParam = urlParams.get('type')
     
-    // Check if we have a valid type parameter
     if (typeParam === 'admin' || typeParam === 'user') {
         return true
     }
     
-    // Check if we have a referrer from main sites
     const referrer = document.referrer
     if (referrer) {
         try {
@@ -138,54 +126,6 @@ function hasAuthContext() {
     }
     
     return false
-}
-
-/**
- * Get login type from URL or referrer
- */
-function getLoginType() {
-    // First check URL parameter
-    const urlParams = new URLSearchParams(window.location.search)
-    const typeParam = urlParams.get('type')
-    
-    if (typeParam === 'admin' || typeParam === 'user') {
-        return typeParam
-    }
-    
-    // Check referrer
-    const referrer = document.referrer
-    if (referrer) {
-        try {
-            const referrerUrl = new URL(referrer)
-            const hostname = referrerUrl.hostname
-            
-            if (hostname === 'cp.fansmeed.com' || hostname.startsWith('cp.')) {
-                return 'admin'
-            }
-            
-            if (hostname === 'fansmeed.com') {
-                return 'user'
-            }
-        } catch (error) {
-            console.warn('Error parsing referrer:', error)
-        }
-    }
-    
-    return null
-}
-
-/**
- * Redirect to appropriate main site
- */
-function redirectToMainSite(loginType = null) {
-    let targetUrl = 'https://fansmeed.com/'
-    
-    if (loginType === 'admin') {
-        targetUrl = 'https://cp.fansmeed.com/'
-    }
-    
-    console.log(`🔄 Redirecting to main site: ${targetUrl}`)
-    window.location.href = targetUrl
 }
 
 router.beforeEach(async (to, from, next) => {
@@ -210,9 +150,6 @@ router.beforeEach(async (to, from, next) => {
             
             if (!hasContext) {
                 console.warn('⚠️ Login page accessed without auth context')
-                
-                // Show error on the login page itself instead of redirecting
-                // The Login.vue component will handle showing the error message
                 next()
                 return
             }
@@ -236,9 +173,8 @@ router.beforeEach(async (to, from, next) => {
         
         // Don't let authenticated users access auth pages
         if (['Login', 'Register', 'ResetPassword', 'VerifyEmail'].includes(to.name)) {
-            // Determine where to redirect based on user role
-            const loginType = authStore.userRole || 'user'
-            redirectToMainSite(loginType)
+            // Handle post-login redirect
+            await authStore.handlePostLoginRedirect()
             return
         }
     }
@@ -249,10 +185,7 @@ router.beforeEach(async (to, from, next) => {
 // Handle navigation errors
 router.onError((error, to, from) => {
     console.error('❌ [Auth Router] Navigation error:', error)
-    console.error('❌ [Auth Router] To:', to)
-    console.error('❌ [Auth Router] From:', from)
     
-    // If it's a chunk load error, try reloading
     if (error && error.message && error.message.includes('Failed to fetch dynamically imported module')) {
         console.log('🔄 [Auth Router] Chunk load error detected, reloading page...')
         window.location.reload()
@@ -263,7 +196,6 @@ router.onError((error, to, from) => {
 router.isReady().then(() => {
     console.log('✅ [Auth Router] Router is ready')
     
-    // Set initial title
     if (router.currentRoute.value.meta?.title) {
         setDocumentTitle(router.currentRoute.value)
     }

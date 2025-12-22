@@ -1,13 +1,10 @@
 <!-- Location: auth.fansmeed.com/src/views/Login.vue -->
 <template>
     <div class="min-h-screen flex flex-col lg:flex-row">
-        <div
-            class="account-head lg:w-[500px] lg:min-h-screen lg:fixed lg:top-0 lg:left-0 h-70 lg:h-screen relative overflow-hidden">
+        <div class="account-head lg:w-[500px] lg:min-h-screen lg:fixed lg:top-0 lg:left-0 h-70 lg:h-screen relative overflow-hidden">
             <img :src="randomImage" alt="Login Background" class="absolute inset-0 w-full h-full object-cover" />
-            <!-- Dark Overlay -->
             <div class="absolute inset-0 bg-black/70 backdrop-blur-sm"></div>
 
-            <!-- Logo Centered Perfectly -->
             <div class="relative z-10 h-full flex items-center justify-center p-8">
                 <div class="flex justify-center flex-col text-center">
                     <div class="size-16 bg-primary rounded-lg flex items-center justify-center">
@@ -32,8 +29,7 @@
 
                 <!-- Loading State -->
                 <div v-if="checking" class="mb-6">
-                    <div
-                        class="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
+                    <div class="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
                         <div class="flex items-center">
                             <div class="flex-shrink-0">
                                 <i class="pi pi-spin pi-spinner text-blue-600 dark:text-blue-400 text-xl"></i>
@@ -126,10 +122,22 @@ const getRandomImage = () => {
 
 const detectUserType = () => {
     checking.value = true
-    const type = detectLoginType()
-    loginType.value = type
-    checking.value = false
-    console.log(`✅ Final login type: ${type}`)
+    
+    // First check URL parameter
+    const urlParams = new URLSearchParams(window.location.search);
+    const typeParam = urlParams.get('type');
+    
+    if (typeParam === 'admin' || typeParam === 'user') {
+        loginType.value = typeParam;
+        console.log(`✅ Login type from URL: ${typeParam}`);
+    } else {
+        // Use subdomain detector as fallback
+        const type = detectLoginType();
+        loginType.value = type;
+        console.log(`✅ Login type detected: ${type}`);
+    }
+    
+    checking.value = false;
 }
 
 const goToAdminSite = () => {

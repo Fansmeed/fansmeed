@@ -1,11 +1,7 @@
 // Location: auth.fansmeed.com/src/stores/authStore.js
 import { defineStore } from 'pinia';
 import { useUiStore } from './uiStore';
-import {
-    auth,
-    db,
-    functions
-} from '@/firebase/firebaseInit';
+import { auth, db } from '@/firebase/firebaseInit';
 import {
     sendSignInLinkToEmail,
     signInWithEmailLink,
@@ -18,12 +14,8 @@ import {
     sendPasswordResetEmail,
     GoogleAuthProvider,
     FacebookAuthProvider,
-    signInWithPopup,
-    signInWithCustomToken
+    signInWithPopup
 } from "firebase/auth";
-import {
-    httpsCallable
-} from "firebase/functions";
 import {
     collection,
     doc,
@@ -36,42 +28,27 @@ import {
     setDoc,
     deleteDoc,
 } from "firebase/firestore";
-import { getFunctions } from 'firebase/functions';
 import { collectDeviceInfo } from '@/utils/deviceInfo';
-import { buildRedirectUrl, getRedirectUrlFromParams } from '@/utils/subdomainDetector';
-import { ENV } from '@/config'
+import { ENV } from '@/config';
 
-// Authentication operations
 export const AUTH_OPERATIONS = {
-    // User operations
     USER_LOGIN: 'USER_LOGIN',
     USER_REGISTER: 'USER_REGISTER',
     USER_RESET_PASSWORD: 'USER_RESET_PASSWORD',
     USER_VERIFY_EMAIL: 'USER_VERIFY_EMAIL',
-
-    // Admin operations
-    ADMIN_LOGIN: 'ADMIN_LOGIN',
     ADMIN_SEND_LINK: 'ADMIN_SEND_LINK',
-
-    // Common operations
     COMPLETE_SIGN_IN: 'COMPLETE_SIGN_IN',
     CHECK_AUTH: 'CHECK_AUTH',
     LOGOUT: 'LOGOUT',
     FETCH_USER_PROFILE: 'FETCH_USER_PROFILE',
-    SOCIAL_LOGIN: 'SOCIAL_LOGIN',
-    
-    // NEW: Passport operations
-    REQUEST_PASSPORT: 'REQUEST_PASSPORT',
-    VERIFY_EMAIL_LINK: 'VERIFY_EMAIL_LINK'
+    SOCIAL_LOGIN: 'SOCIAL_LOGIN'
 };
 
-// User roles
 const USER_ROLES = {
     USER: 'user',
     ADMIN: 'admin'
 };
 
-// Collections
 const COLLECTIONS = {
     USERS: 'users',
     EMPLOYEES: 'employees'
@@ -123,8 +100,6 @@ async function migrateToRealUid(temporaryUid, realUid, collectionName) {
         };
 
         await setDoc(doc(db, collectionName, realUid), updatedData);
-
-        // Delete the temporary document
         await deleteDoc(oldDocRef);
 
         console.log(`✅ Migrated from ${temporaryUid} to ${realUid} in ${collectionName}`);
@@ -187,76 +162,7 @@ async function updateLoginHistory(uid, userData, deviceInfo) {
 
     } catch (error) {
         console.error('❌ Failed to update login history:', error);
-        // Don't throw - allow login to continue
     }
-}
-
-
-// In authStore.js, update getTargetAppFromUrl function:
-function getTargetAppFromUrl() {
-    console.log('🔍 getTargetAppFromUrl() called');
-    console.log('📍 Full URL:', window.location.href);
-    
-    // Parse the current URL
-    const currentUrl = new URL(window.location.href);
-    const urlParams = currentUrl.searchParams;
-    
-    console.log('🔍 All URL parameters:');
-    for (const [key, value] of urlParams.entries()) {
-        console.log(`  ${key}: ${value}`);
-    }
-    
-    // Check for direct type parameter
-    const typeParam = urlParams.get('type');
-    console.log(`🔍 Direct type param: ${typeParam}`);
-    
-    if (typeParam === 'admin' || typeParam === 'user') {
-        console.log(`✅ Target app from direct type param: ${typeParam}`);
-        return typeParam;
-    }
-    
-    // Check if we have a continueUrl (from email link)
-    const continueUrl = urlParams.get('continueUrl');
-    if (continueUrl) {
-        console.log('🔍 Found continueUrl, parsing...');
-        try {
-            const decodedContinueUrl = decodeURIComponent(continueUrl);
-            console.log(`🔍 Decoded continueUrl: ${decodedContinueUrl}`);
-            
-            // Parse the continueUrl
-            const continueUrlObj = new URL(decodedContinueUrl);
-            const continueUrlParams = continueUrlObj.searchParams;
-            
-            const typeFromContinueUrl = continueUrlParams.get('type');
-            console.log(`🔍 Type from continueUrl: ${typeFromContinueUrl}`);
-            
-            if (typeFromContinueUrl === 'admin' || typeFromContinueUrl === 'user') {
-                console.log(`✅ Target app from continueUrl: ${typeFromContinueUrl}`);
-                return typeFromContinueUrl;
-            }
-        } catch (error) {
-            console.warn('Error parsing continueUrl:', error);
-        }
-    }
-    
-    // Check the current path
-    const currentPath = currentUrl.pathname;
-    console.log(`🔍 Current path: ${currentPath}`);
-    
-    // If we're coming from an admin email link, the type should be in the original URL
-    // The email link looks like: /auth/complete-signin?type=admin&email=...
-    // But when clicked, Firebase adds its own parameters
-    
-    // HARDCODE for testing: If user is admin, force admin
-    console.log(`🔍 User role from store: ${this.userRole}`);
-    if (this.userRole === 'admin') {
-        console.log('✅ Force target app: admin (user is admin)');
-        return 'admin';
-    }
-    
-    // Default fallback
-    console.log('⚠️ Could not determine target app, defaulting to user');
-    return 'user';
 }
 
 export const useAuthStore = defineStore('auth', {
@@ -265,9 +171,7 @@ export const useAuthStore = defineStore('auth', {
         userProfile: null,
         authChecked: false,
         userRole: null,
-        // NEW: Store passport information
-        passportRequested: false,
-        lastTargetApp: null
+        redirectUrl: null
     }),
 
     getters: {
@@ -280,7 +184,7 @@ export const useAuthStore = defineStore('auth', {
 
     actions: {
         /**
-         * Initialize authentication - setup Firebase listener only
+         * Initialize authentication - setup Firebase listener
          */
         async initialize() {
             const uiStore = useUiStore();
@@ -293,10 +197,15 @@ export const useAuthStore = defineStore('auth', {
 
                     if (user) {
                         this.currentUser = user;
-
-                        // Determine user role by checking database
                         await this.determineUserRole(user);
-
+                        
+                        // If we have a redirect URL stored, handle it
+                        const redirectUrl = sessionStorage.getItem('loginRedirectUrl');
+                        if (redirectUrl && this.userRole) {
+                            console.log('🔄 Redirect URL found, handling post-login redirect');
+                            sessionStorage.removeItem('loginRedirectUrl');
+                            await this.handlePostLoginRedirect();
+                        }
                     } else {
                         this.currentUser = null;
                         this.userProfile = null;
@@ -315,7 +224,6 @@ export const useAuthStore = defineStore('auth', {
          * Determine user role from database
          */
         async determineUserRole(user) {
-            // Try to determine role from database
             try {
                 // Check if user is admin
                 const employeeDoc = await findUserByEmail(user.email, COLLECTIONS.EMPLOYEES);
@@ -354,7 +262,6 @@ export const useAuthStore = defineStore('auth', {
                         const result = await signInWithEmailAndPassword(auth, email, password);
 
                         if (!result.user.emailVerified) {
-                            // User needs to verify email
                             throw new Error('USER_EMAIL_NOT_VERIFIED:Please verify your email before logging in.');
                         }
 
@@ -365,10 +272,9 @@ export const useAuthStore = defineStore('auth', {
                         // Determine user role
                         await this.determineUserRole(result.user);
 
-                        // NEW: After successful login, redirect to complete auth flow
+                        // Handle post-login redirect
                         await this.handlePostLoginRedirect();
 
-                        // Return success data
                         return {
                             user: result.user,
                             success: true
@@ -422,7 +328,6 @@ export const useAuthStore = defineStore('auth', {
                             createdAt: serverTimestamp(),
                             lastLogin: null,
                             requiresUidMigration: true,
-                            // Additional fields
                             balance: 0,
                             totalWinnings: 0,
                             quizHistory: [],
@@ -519,10 +424,9 @@ export const useAuthStore = defineStore('auth', {
                         const deviceInfo = await collectDeviceInfo();
                         await updateLoginHistory(userUid, { role: USER_ROLES.USER }, deviceInfo);
 
-                        // NEW: After successful social login, redirect to complete auth flow
+                        // Handle post-login redirect
                         await this.handlePostLoginRedirect();
 
-                        // Return success
                         return {
                             user: result.user,
                             success: true
@@ -564,7 +468,6 @@ export const useAuthStore = defineStore('auth', {
                             handleCodeInApp: false
                         });
 
-                        // Return success
                         return {
                             success: true,
                             email: email
@@ -582,111 +485,45 @@ export const useAuthStore = defineStore('auth', {
          * ADMIN: Send login link
          */
         async adminSendLoginLink(userId) {
-    const uiStore = useUiStore();
-    const key = AUTH_OPERATIONS.ADMIN_SEND_LINK;
-
-    return await uiStore.withOperation(
-        key,
-        async () => {
-            const email = `${userId.trim().toLowerCase()}@gmail.com`;
-
-            // Check if admin exists
-            const employeeDoc = await findUserByEmail(email, COLLECTIONS.EMPLOYEES);
-            if (!employeeDoc) {
-                throw new Error('No admin account found with this user ID.');
-            }
-
-            const employeeData = employeeDoc.data();
-
-            // Check if admin is active
-            if (!employeeData.isActive) {
-                throw new Error('This admin account is disabled.');
-            }
-
-            // IMPORTANT: Add type=admin parameter
-            const actionCodeSettings = {
-                url: `${window.location.origin}/auth/complete-signin?type=admin&email=${encodeURIComponent(email)}`,
-                handleCodeInApp: true
-            };
-
-            await sendSignInLinkToEmail(auth, email, actionCodeSettings);
-
-            return {
-                message: 'Login link sent to your email!',
-                email: email
-            };
-        }
-    );
-},
-
-        /**
-         * NEW: Request passport (custom token) for target app
-         */
-        async requestPassport(targetApp) {
             const uiStore = useUiStore();
-            const key = AUTH_OPERATIONS.REQUEST_PASSPORT;
+            const key = AUTH_OPERATIONS.ADMIN_SEND_LINK;
 
             return await uiStore.withOperation(
                 key,
                 async () => {
-                    try {
-                        // Get current user
-                        const user = auth.currentUser;
-                        if (!user) {
-                            throw new Error('User not authenticated. Please login first.');
-                        }
+                    const email = `${userId.trim().toLowerCase()}@gmail.com`;
 
-                        console.log(`🎫 Requesting passport for ${targetApp}...`);
-                        console.log(`👤 Current user UID: ${user.uid}`);
-                        console.log(`📧 User email: ${user.email}`);
-
-                        // Get ID token for authentication
-                        const idToken = await user.getIdToken(true);
-                        console.log('✅ ID token obtained');
-
-                        // Initialize functions if not already done
-                        if (!functions) {
-                            console.error('❌ Firebase Functions not initialized');
-                            throw new Error('Firebase Functions not available');
-                        }
-
-                        // Call the Gatekeeper Cloud Function
-                        const issuePassport = httpsCallable(functions, 'issuePassport');
-                        
-                        const result = await issuePassport({ 
-                            targetApp: targetApp 
-                        }, {
-                            headers: {
-                                'Authorization': `Bearer ${idToken}`
-                            }
-                        });
-
-                        console.log(`✅ Passport received for ${targetApp}:`, result.data);
-                        
-                        // Store for debugging
-                        this.lastTargetApp = targetApp;
-                        this.passportRequested = true;
-                        
-                        return result.data;
-
-                    } catch (error) {
-                        console.error('❌ Passport request failed:', error);
-                        
-                        // Handle specific errors
-                        if (error.code === 'permission-denied') {
-                            throw new Error('You do not have permission to access this application.');
-                        } else if (error.code === 'unauthenticated') {
-                            throw new Error('Authentication required. Please login again.');
-                        }
-                        
-                        throw new Error(`Failed to obtain access: ${error.message}`);
+                    // Check if admin exists
+                    const employeeDoc = await findUserByEmail(email, COLLECTIONS.EMPLOYEES);
+                    if (!employeeDoc) {
+                        throw new Error('No admin account found with this user ID.');
                     }
+
+                    const employeeData = employeeDoc.data();
+
+                    // Check if admin is active
+                    if (!employeeData.isActive) {
+                        throw new Error('This admin account is disabled.');
+                    }
+
+                    // Add type=admin parameter
+                    const actionCodeSettings = {
+                        url: `${window.location.origin}/auth/complete-signin?type=admin&email=${encodeURIComponent(email)}`,
+                        handleCodeInApp: true
+                    };
+
+                    await sendSignInLinkToEmail(auth, email, actionCodeSettings);
+
+                    return {
+                        message: 'Login link sent to your email!',
+                        email: email
+                    };
                 }
             );
         },
 
         /**
-         * Complete sign-in (for email link authentication) - UPDATED
+         * Complete sign-in (for email link authentication)
          */
         async completeSignIn(url) {
             const uiStore = useUiStore();
@@ -766,9 +603,6 @@ export const useAuthStore = defineStore('auth', {
 
                         console.log(`🔐 [Auth] ${userRole.toUpperCase()} sign-in completed successfully`);
 
-                        // NEW: Handle post-login redirect
-                        await this.handlePostLoginRedirect();
-
                         return result.user;
 
                     } catch (firebaseError) {
@@ -779,70 +613,67 @@ export const useAuthStore = defineStore('auth', {
             );
         },
 
-
-/**
- * Handle post-login redirect
- */
-
-
-// Then update the handlePostLoginRedirect function:
-async handlePostLoginRedirect() {
-    try {
-        console.log('🔄 [Auth] Handling post-login redirect...')
-        
-        const user = auth.currentUser
-        if (!user) {
-            throw new Error('No authenticated user')
-        }
-        
-        // Get fresh ID token
-        const idToken = await user.getIdToken(true)
-        console.log('✅ ID token obtained')
-        
-        // Determine user role from authStore
-        const role = this.userRole || 'user'
-        console.log(`👤 User role: ${role}`)
-        
-        // Get redirect URL from sessionStorage or use default
-        let redirectUrl = role === 'admin' 
-            ? 'https://cp.fansmeed.com/' 
-            : 'https://fansmeed.com/'
-        
-        const storedRedirect = sessionStorage.getItem('loginRedirectUrl')
-        if (storedRedirect) {
-            redirectUrl = storedRedirect
-            sessionStorage.removeItem('loginRedirectUrl')
-        }
-        
-        // IMPORTANT: Use ENV.functions.setSessionCookie
-        const cloudFunctionUrl = `${ENV.functions.setSessionCookie}?token=${encodeURIComponent(idToken)}&redirectUrl=${encodeURIComponent(redirectUrl)}&role=${role}`
-        
-        console.log(`🔄 [Auth] Redirecting to Cloud Function: ${cloudFunctionUrl}`)
-        
-        // Clear any local auth data
-        this.cleanup()
-        
-        // Redirect immediately (don't wait)
-        window.location.href = cloudFunctionUrl
-        
-    } catch (error) {
-        console.error('❌ [Auth] Post-login redirect failed:', error)
-        const uiStore = useUiStore()
-        uiStore.setError(AUTH_OPERATIONS.REQUEST_PASSPORT, error.message || 'Failed to redirect after login')
-        
-        // Fallback: redirect to main site
-        setTimeout(() => {
-            window.location.href = 'https://fansmeed.com'
-        }, 2000)
-    }
-},
+        /**
+         * PASSPORT HANDOFF: Handle post-login redirect
+         */
+        async handlePostLoginRedirect() {
+            try {
+                console.log('🔄 [Auth] Handling post-login redirect...')
+                
+                const user = auth.currentUser;
+                if (!user) {
+                    throw new Error('No authenticated user');
+                }
+                
+                // Get fresh ID token (the "passport")
+                const idToken = await user.getIdToken(true);
+                console.log('✅ ID token obtained');
+                
+                // Get user role
+                const role = this.userRole || 'user';
+                console.log(`👤 User role: ${role}`);
+                
+                // Get redirect URL
+                let redirectUrl = sessionStorage.getItem('loginRedirectUrl');
+                
+                if (!redirectUrl) {
+                    // Default redirect based on role
+                    redirectUrl = role === 'admin' 
+                        ? 'https://cp.fansmeed.com/' 
+                        : 'https://fansmeed.com/';
+                } else {
+                    sessionStorage.removeItem('loginRedirectUrl');
+                }
+                
+                // Clean the redirect URL (remove any existing token params)
+                const cleanUrl = new URL(redirectUrl);
+                cleanUrl.searchParams.delete('token');
+                cleanUrl.searchParams.delete('role');
+                cleanUrl.searchParams.delete('source');
+                
+                // Add the passport (ID token) to the URL
+                cleanUrl.searchParams.set('token', idToken);
+                cleanUrl.searchParams.set('role', role);
+                cleanUrl.searchParams.set('source', 'auth_hub');
+                
+                console.log(`🔄 [Auth] Redirecting with passport to: ${cleanUrl.toString()}`);
+                
+                // Redirect with the passport
+                window.location.href = cleanUrl.toString();
+                
+            } catch (error) {
+                console.error('❌ [Auth] Post-login redirect failed:', error);
+                // Fallback: redirect to auth hub login
+                window.location.href = '/auth/login';
+            }
+        },
 
         /**
-         * Verify email (for new user registrations) - UPDATED
+         * Verify email (for new user registrations)
          */
         async verifyEmail(url) {
             const uiStore = useUiStore();
-            const key = AUTH_OPERATIONS.VERIFY_EMAIL_LINK;
+            const key = AUTH_OPERATIONS.USER_VERIFY_EMAIL;
 
             return await uiStore.withOperation(
                 key,
@@ -905,7 +736,7 @@ async handlePostLoginRedirect() {
 
                         console.log('✅ [Auth] Email verification completed successfully');
 
-                        // NEW: After verification, handle redirect
+                        // After verification, handle redirect
                         await this.handlePostLoginRedirect();
 
                         return result.user;
@@ -1008,8 +839,6 @@ async handlePostLoginRedirect() {
             this.userProfile = null;
             this.authChecked = false;
             this.userRole = null;
-            this.passportRequested = false;
-            this.lastTargetApp = null;
 
             sessionStorage.clear();
             console.log('🔐 [Auth] Auth store cleaned up');
