@@ -39,6 +39,7 @@ import {
 import { getFunctions } from 'firebase/functions';
 import { collectDeviceInfo } from '@/utils/deviceInfo';
 import { buildRedirectUrl, getRedirectUrlFromParams } from '@/utils/subdomainDetector';
+import { ENV } from '@/config'
 
 // Authentication operations
 export const AUTH_OPERATIONS = {
@@ -782,6 +783,9 @@ export const useAuthStore = defineStore('auth', {
 /**
  * Handle post-login redirect
  */
+
+
+// Then update the handlePostLoginRedirect function:
 async handlePostLoginRedirect() {
     try {
         console.log('🔄 [Auth] Handling post-login redirect...')
@@ -795,7 +799,7 @@ async handlePostLoginRedirect() {
         const idToken = await user.getIdToken(true)
         console.log('✅ ID token obtained')
         
-        // Determine user role
+        // Determine user role from authStore
         const role = this.userRole || 'user'
         console.log(`👤 User role: ${role}`)
         
@@ -810,7 +814,7 @@ async handlePostLoginRedirect() {
             sessionStorage.removeItem('loginRedirectUrl')
         }
         
-        // Build Cloud Function URL with ALL required parameters
+        // IMPORTANT: Use ENV.functions.setSessionCookie
         const cloudFunctionUrl = `${ENV.functions.setSessionCookie}?token=${encodeURIComponent(idToken)}&redirectUrl=${encodeURIComponent(redirectUrl)}&role=${role}`
         
         console.log(`🔄 [Auth] Redirecting to Cloud Function: ${cloudFunctionUrl}`)

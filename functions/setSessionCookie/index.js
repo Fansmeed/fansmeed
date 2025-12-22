@@ -6,8 +6,9 @@ if (!admin.apps.length) {
     admin.initializeApp();
 }
 
-// Session duration: 5 days
-const SESSION_DURATION = 60 * 60 * 24 * 5 * 1000; // 5 days in milliseconds
+// Session duration: 5 days in SECONDS (not milliseconds)
+const SESSION_DURATION_SECONDS = 60 * 60 * 24 * 5; // 5 days in seconds
+const SESSION_DURATION_MS = SESSION_DURATION_SECONDS * 1000; // 5 days in milliseconds
 
 exports.setSessionCookie = onRequest(
     {
@@ -31,16 +32,16 @@ exports.setSessionCookie = onRequest(
         }
 
         try {
-            // Get token from query or authorization header
-            const idToken = req.query.token || 
-                           (req.headers.authorization && req.headers.authorization.split("Bearer ")[1]);
-            
+            // Get token from query
+            const idToken = req.query.token;
             const redirectUrl = req.query.redirectUrl;
             const role = req.query.role || "user";
+            const firestoreDocId = req.query.firestoreDocId;
 
             console.log("📨 Token received:", idToken ? "Yes" : "No");
             console.log("🔗 Redirect URL:", redirectUrl);
             console.log("🎭 Role:", role);
+            console.log("📄 Firestore Doc ID:", firestoreDocId);
 
             if (!idToken) {
                 throw new Error("No ID token provided");
@@ -53,7 +54,7 @@ exports.setSessionCookie = onRequest(
 
             // Create a Firebase session cookie
             const sessionCookie = await admin.auth().createSessionCookie(idToken, {
-                expiresIn: SESSION_DURATION,
+                expiresIn: SESSION_DURATION_SECONDS,
             });
 
             // Determine correct redirect URL
@@ -64,25 +65,26 @@ exports.setSessionCookie = onRequest(
                     : "https://fansmeed.com/";
             }
 
-            console.log("🍪 Creating session cookie...");
+            console.log("🍪 Creating session cookies...");
             
-            // CRITICAL: Set cookie with proper domain for cross-subdomain access
-            const cookieOptions = {
-                maxAge: SESSION_DURATION,
+            // Set Firebase's __session cookie (HttpOnly for security)
+            res.cookie("__session", sessionCookie, {
+                maxAge: SESSION_DURATION_MS,
                 httpOnly: true,
-                secure: true, // Must be true for cross-domain
-                domain: ".fansmeed.com", // Leading dot for all subdomains
-                sameSite: "lax", // Use "lax" for same-site cookies
+                secure: true,
+                domain: ".fansmeed.com",
+                sameSite: "lax",
                 path: "/",
-            };
-
-            // Set the cookie
-            res.cookie("__session", sessionCookie, cookieOptions);
+            });
             
-            // Also set a custom cookie for your app
+            // Also set a custom cookie for your app (non-HttpOnly for client access)
             res.cookie("auth_session", sessionCookie, {
-                ...cookieOptions,
-                httpOnly: false, // Allow client-side access if needed
+                maxAge: SESSION_DURATION_MS,
+                httpOnly: false, // Allow JavaScript access
+                secure: true,
+                domain: ".fansmeed.com",
+                sameSite: "lax",
+                path: "/",
             });
 
             // Set CORS headers
@@ -95,8 +97,9 @@ exports.setSessionCookie = onRequest(
             res.set("X-Auth-User", decodedToken.uid);
             res.set("X-Auth-Role", role);
             res.set("X-Session-Set", "true");
+            res.set("X-Firestore-DocId", firestoreDocId || decodedToken.uid);
 
-            console.log(`✅ Session cookie set for ${decodedToken.uid}`);
+            console.log(`✅ Session cookies set for ${decodedToken.uid}`);
             console.log(`🔄 Redirecting to: ${finalRedirectUrl}`);
 
             // Redirect to target site
@@ -110,19 +113,29 @@ exports.setSessionCookie = onRequest(
             res.clearCookie("__session", {
                 domain: ".fansmeed.com",
                 path: "/",
+                secure: true,
+                httpOnly: true,
+                sameSite: "lax"
             });
             res.clearCookie("auth_session", {
                 domain: ".fansmeed.com",
                 path: "/",
+                secure: true,
+                httpOnly: false,
+                sameSite: "lax"
             });
 
             // Set error headers
             res.set("Access-Control-Allow-Origin", "*");
             res.set("Access-Control-Allow-Credentials", "true");
 
+            // Determine error type
+            let errorType = "auth_failed";
+            if (error.message.includes("expired")) errorType = "token_expired";
+            if (error.message.includes("invalid signature")) errorType = "invalid_token";
+
             // Redirect to auth hub with error
-            const errorParam = encodeURIComponent(error.message.includes("expired") ? "token_expired" : "auth_failed");
-            res.redirect(302, `https://auth.fansmeed.com/auth/login?error=${errorParam}`);
+            res.redirect(302, `https://auth.fansmeed.com/auth/login?error=${errorType}`);
         }
     }
 );
