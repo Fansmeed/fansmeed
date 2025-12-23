@@ -20,7 +20,7 @@ exports.setSessionCookie = onRequest(
         region: "us-central1",
         cors: true,
         maxInstances: 10,
-        timeoutSeconds: 30,
+        timeoutSeconds: 90,
         memory: "256MiB",
     },
     async (req, res) => {

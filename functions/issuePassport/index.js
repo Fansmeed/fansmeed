@@ -11,7 +11,7 @@ exports.issuePassport = onCall(
         region: "us-central1",
         cors: true,
         maxInstances: 10,
-        timeoutSeconds: 30
+        timeoutSeconds: 90
     },
     async (request) => {
         console.log("🎫 [Gatekeeper] IssuePassport called");
