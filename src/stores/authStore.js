@@ -619,7 +619,6 @@ export const useAuthStore = defineStore('auth', {
         // Location: auth.fansmeed.com/src/stores/authStore.js
 // Update the handlePostLoginRedirect method:
 
-// Alternative: localStorage approach in auth.fansmeed.com authStore.js
 async handlePostLoginRedirect() {
     try {
         console.log('🔄 [Auth] Handling post-login redirect...')
@@ -637,37 +636,21 @@ async handlePostLoginRedirect() {
         const role = this.userRole || 'user'
         console.log(`👤 User role: ${role}`)
         
-        // Store token in localStorage with expiry
-        localStorage.setItem('auth_passport_token', idToken)
-        localStorage.setItem('auth_passport_role', role)
-        localStorage.setItem('auth_passport_timestamp', Date.now().toString())
-        
-        // 1-minute expiry for security
-        localStorage.setItem('auth_passport_expiry', (Date.now() + 60000).toString())
-        
-        // Get redirect URL
+        // Get redirect URL from session storage or use callback route
         let redirectUrl = sessionStorage.getItem('loginRedirectUrl')
         
         if (!redirectUrl) {
-            // Always redirect to callback route
+            // Use callback route instead of root
             redirectUrl = role === 'admin' 
                 ? 'https://cp.fansmeed.com/auth/callback' 
                 : 'https://fansmeed.com/auth/callback'
         } else {
-            // Convert stored URL to use callback route
+            // If we have a stored redirect URL, convert it to use callback route
             try {
                 const url = new URL(redirectUrl)
-                // Change path to callback route
-                const callbackUrl = new URL(`${url.origin}/auth/callback`)
-                // Preserve any other query params (except token ones)
-                const searchParams = new URLSearchParams(url.search)
-                searchParams.delete('token')
-                searchParams.delete('role')
-                searchParams.delete('source')
-                if (searchParams.toString()) {
-                    callbackUrl.search = searchParams.toString()
-                }
-                redirectUrl = callbackUrl.toString()
+                // Keep the same domain but change path to /auth/callback
+                url.pathname = '/auth/callback'
+                redirectUrl = url.toString()
             } catch (error) {
                 console.warn('⚠️ Could not parse redirect URL, using default callback')
                 redirectUrl = role === 'admin' 
@@ -678,11 +661,25 @@ async handlePostLoginRedirect() {
             sessionStorage.removeItem('loginRedirectUrl')
         }
         
-        console.log(`🔄 [Auth] Redirecting to: ${redirectUrl}`)
-        window.location.href = redirectUrl
+        // Clean the redirect URL (remove any existing token params)
+        const cleanUrl = new URL(redirectUrl)
+        cleanUrl.searchParams.delete('token')
+        cleanUrl.searchParams.delete('role')
+        cleanUrl.searchParams.delete('source')
+        
+        // Add the passport (ID token) to the URL
+        cleanUrl.searchParams.set('token', idToken)
+        cleanUrl.searchParams.set('role', role)
+        cleanUrl.searchParams.set('source', 'auth_hub')
+        
+        console.log(`🔄 [Auth] Redirecting to callback route: ${cleanUrl.toString()}`)
+        
+        // Redirect with the passport to callback route
+        window.location.href = cleanUrl.toString()
         
     } catch (error) {
         console.error('❌ [Auth] Post-login redirect failed:', error)
+        // Fallback: redirect to auth hub login
         window.location.href = '/auth/login'
     }
 },
