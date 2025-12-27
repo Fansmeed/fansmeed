@@ -101,7 +101,7 @@ const checking = ref(true)
 const headerTitle = computed(() => {
     switch (loginType.value) {
         case 'admin': return 'Admin Portal';
-        case 'user': return 'FansMeed';
+        case 'user': return 'Welcome Back';
         default: return 'Authentication';
     }
 })
